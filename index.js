@@ -44,7 +44,7 @@ async function start() {
   app.use('/api', routes);
 
   // Socket namespace
-  require('./realtime/io')(io, logger);
+  require('./socketController/io')(io, logger);
 
   // Error handler
   app.use(errorHandler);
