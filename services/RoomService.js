@@ -90,11 +90,21 @@ function clearWaitingTimeout(roomId) {
   waitingTimeouts.delete(roomId);
 }
 
+async function listRooms({ status, stake, mode } = {}) {
+  const filter = {};
+  if (status) filter.status = status;
+  if (typeof stake !== 'undefined') filter.stake = Number(stake);
+  if (mode) filter.mode = mode;
+  const rooms = await Room.find(filter).sort({ createdAt: -1 }).lean();
+  return rooms;
+}
+
 module.exports = {
   createRoom,
   joinRoom,
   startGameIfFull,
   cancelRoom,
+  listRooms,
   scheduleWaitingTimeout,
   clearWaitingTimeout,
 };

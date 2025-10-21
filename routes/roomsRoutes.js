@@ -3,7 +3,7 @@
 const express = require('express');
 const { validate } = require('../middlewares/validate');
 const { schemas } = require('../utils/schema');
-const { createRoom, joinRoom } = require('../services/RoomService');
+const { createRoom, joinRoom, listRooms } = require('../services/RoomService');
 
 const router = express.Router();
 
@@ -30,8 +30,14 @@ router.post('/join', validate(schemas.roomJoin), async (req, res, next) => {
   }
 });
 
-router.get('/', async (req, res) => {
-  res.json([]);
+router.get('/', async (req, res, next) => {
+  try {
+    const { status, stake, mode } = req.query;
+    const rooms = await listRooms({ status, stake, mode });
+    res.json(rooms);
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;
