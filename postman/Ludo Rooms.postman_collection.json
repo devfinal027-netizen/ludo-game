@@ -1,0 +1,59 @@
+{
+  "info": {
+    "name": "Ludo Rooms",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "b5e9f9a8-8ea7-4e3a-8d5c-rooms"
+  },
+  "item": [
+    {
+      "name": "Create Room",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/rooms/create", "host": ["{{baseUrl}}"], "path": ["api","rooms","create"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"stake\": 10,\n  \"mode\": \"Classic\",\n  \"maxPlayers\": 2\n}"
+        }
+      }
+    },
+    {
+      "name": "Join Room",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/rooms/join", "host": ["{{baseUrl}}"], "path": ["api","rooms","join"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"roomId\": \"{{roomId}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "List Rooms",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/rooms?status=waiting",
+          "host": ["{{baseUrl}}"],
+          "path": ["api","rooms"],
+          "query": [ {"key":"status","value":"waiting"} ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "token", "value": "" },
+    { "key": "roomId", "value": "" }
+  ]
+}
