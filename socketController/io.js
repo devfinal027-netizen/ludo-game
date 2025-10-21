@@ -81,6 +81,32 @@ module.exports = function init(io, logger) {
       cb && cb({ rooms });
     });
 
+    // Leave socket rooms
+    async function handleLeave(payload, cb) {
+      try {
+        const { roomId } = payload || {};
+        if (roomId) {
+          await socket.leave(roomId);
+          logger.info('room:leave', { socketId: socket.id, roomId });
+          return cb && cb({ ok: true, roomId });
+        }
+        // If no roomId provided, leave all joined rooms except the socket's own room
+        const joined = Array.from(socket.rooms || []);
+        await Promise.all(
+          joined
+            .filter((r) => r !== socket.id)
+            .map((r) => socket.leave(r)),
+        );
+        logger.info('room:leaveAll', { socketId: socket.id, rooms: joined.filter((r) => r !== socket.id) });
+        cb && cb({ ok: true, leftAll: true });
+      } catch (err) {
+        cb && cb({ ok: false, message: err.message });
+      }
+    }
+
+    socket.on('session:leave', handleLeave);
+    socket.on('room:leave', handleLeave);
+
     // Gameplay events
     socket.on('dice:roll', async ({ roomId }, cb) => {
       try {
