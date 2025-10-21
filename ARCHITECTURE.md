@@ -8,7 +8,7 @@ This document explains the clean separation between routes and controllers in th
 
 ## Routes Responsibility
 
-Routes files (`src/routes/*.js`) should ONLY:
+Routes files (`routes/*.js`) should ONLY:
 1. ✅ Define endpoint paths
 2. ✅ Apply middleware (authentication, validation)
 3. ✅ Call controller methods
@@ -23,7 +23,7 @@ Routes should NOT:
 
 ## Controllers Responsibility
 
-Controller files (`src/controllers/*.js`) should:
+Controller files (`controllers/*.js`) should:
 1. ✅ Implement ALL business logic
 2. ✅ Validate input data
 3. ✅ Interact with database models
@@ -34,7 +34,7 @@ Controller files (`src/controllers/*.js`) should:
 
 ## Examples
 
-### Authentication Routes (`src/routes/authRoutes.js`)
+### Authentication Routes (`routes/authRoutes.js`)
 
 ```javascript
 const express = require('express');
@@ -182,7 +182,7 @@ src/controllers/
 Even Socket.IO handlers follow this pattern:
 
 ```javascript
-// Socket handler (src/socket/socketHandlers.js)
+// Socket handler (socket/socketHandlers.js)
 socket.on('dice:roll', async (data) => {
   try {
     const { gameId } = data;
@@ -199,7 +199,7 @@ socket.on('dice:roll', async (data) => {
 ```
 
 ```javascript
-// Controller method (src/controllers/gameController.js)
+// Controller method (controllers/gameController.js)
 const handleDiceRoll = async (gameId, userId) => {
   // ALL the business logic here
   const game = await Game.findOne({ gameId });

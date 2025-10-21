@@ -18,7 +18,7 @@ ludo-game-backend/
 ├── PROJECT_STRUCTURE.md              # This file
 ├── game.md                           # Game specifications
 │
-└── src/                              # Source code directory
+└── (root)                            # Source code at project root
     │
     ├── config/                       # Configuration files
     │   ├── database.js              # MongoDB connection
@@ -63,11 +63,11 @@ ludo-game-backend/
 ## Key Principles
 
 ### 1. Routes = Endpoint Management ONLY
-**Location**: `src/routes/`
+**Location**: `routes/`
 
 **Purpose**: Define API endpoints and apply middleware
 
-**Example**: `src/routes/authRoutes.js`
+**Example**: `routes/authRoutes.js`
 ```javascript
 router.post('/register/telegram', authController.registerWithTelegram);
 router.post('/login', authController.loginWithPassword);
@@ -77,7 +77,7 @@ router.get('/profile', authenticate, authController.getProfile);
 **Lines of code**: 10-20 lines per file
 
 ### 2. Controllers = ALL Business Logic
-**Location**: `src/controllers/`
+**Location**: `controllers/`
 
 **Purpose**: Implement ALL application functionality
 
@@ -89,7 +89,7 @@ router.get('/profile', authenticate, authController.getProfile);
 - Response formatting
 - Error handling
 
-**Example**: `src/controllers/authController.js`
+**Example**: `controllers/authController.js`
 ```javascript
 const registerWithTelegram = async (req, res, next) => {
   try {
