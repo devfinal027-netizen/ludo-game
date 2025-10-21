@@ -4,6 +4,7 @@ const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 const Client = require('socket.io-client');
+const { MongoMemoryServer } = require('mongodb-memory-server');
 
 const { createLogger } = require('../utils/logger');
 const { connectDatabase } = require('../config/database');
@@ -16,10 +17,11 @@ function delay(ms) {
 }
 
 describe('Socket rooms create→join→full', () => {
-  let io, server, addr;
+  let io, server, addr, mem;
 
   beforeAll(async () => {
-    process.env.MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ludo_test';
+    mem = await MongoMemoryServer.create();
+    process.env.MONGO_URI = mem.getUri();
     await connectDatabase(logger);
 
     const app = express();
@@ -34,6 +36,7 @@ describe('Socket rooms create→join→full', () => {
   afterAll(async () => {
     await io.close();
     await new Promise((r) => server.close(r));
+    if (mem) await mem.stop();
   });
 
   test('create -> join -> full', async () => {
