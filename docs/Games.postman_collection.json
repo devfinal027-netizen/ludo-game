@@ -1,0 +1,42 @@
+{
+  "info": {
+    "name": "Ludo Games API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get Game by ID",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/games/{{gameId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "games", "{{gameId}}"]
+        }
+      }
+    },
+    {
+      "name": "Get Current Game by Room",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/games/room/{{roomId}}/current",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "games", "room", "{{roomId}}", "current"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "roomId", "value": "" },
+    { "key": "gameId", "value": "" }
+  ]
+}
