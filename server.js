@@ -4,11 +4,11 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 
-const connectDatabase = require('./src/config/database');
-const { connectRedis } = require('./src/config/redis');
-const { initializeSocketHandlers } = require('./src/socket/socketHandlers');
-const errorHandler = require('./src/middleware/errorHandler');
-const routes = require('./src/routes');
+const connectDatabase = require('./config/database');
+const { connectRedis } = require('./config/redis');
+const { initializeSocketHandlers } = require('./socket/socketHandlers');
+const errorHandler = require('./middleware/errorHandler');
+const routes = require('./routes');
 
 // Initialize Express app
 const app = express();

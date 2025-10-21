@@ -7,13 +7,13 @@ A Node.js + Express.js backend for a multiplayer Ludo game with Telegram integra
 This project follows a **clean separation of concerns** with the following structure:
 
 ### Routes (Endpoint Management Only)
-- **Location**: `src/routes/`
+- **Location**: `routes/`
 - **Purpose**: Define API endpoints and apply middleware
 - **Responsibility**: Route HTTP requests to appropriate controller methods
 - **No Business Logic**: Routes only handle routing, all logic is in controllers
 
 ### Controllers (Business Logic)
-- **Location**: `src/controllers/`
+- **Location**: `controllers/`
 - **Purpose**: Contain all application business logic
 - **Responsibility**: Process requests, interact with models, return responses
 - **All Functionality Here**: Authentication, wallet operations, game logic, admin functions
@@ -35,37 +35,36 @@ ludo-game-backend/
 ├── server.js                 # Main server file
 ├── package.json
 ├── .env.example
-├── src/
-│   ├── config/              # Database and Redis configuration
-│   │   ├── database.js
-│   │   └── redis.js
-│   ├── middleware/          # Authentication, error handling
-│   │   ├── auth.js
-│   │   └── errorHandler.js
-│   ├── models/              # MongoDB schemas
-│   │   ├── User.js
-│   │   ├── Room.js
-│   │   ├── Game.js
-│   │   └── Transaction.js
-│   ├── controllers/         # ALL BUSINESS LOGIC HERE
-│   │   ├── authController.js
-│   │   ├── walletController.js
-│   │   ├── roomController.js
-│   │   ├── gameController.js
-│   │   └── adminController.js
-│   ├── routes/              # ENDPOINT MANAGEMENT ONLY
-│   │   ├── index.js
-│   │   ├── authRoutes.js
-│   │   ├── walletRoutes.js
-│   │   ├── roomRoutes.js
-│   │   ├── gameRoutes.js
-│   │   └── adminRoutes.js
-│   ├── socket/              # Socket.IO handlers
-│   │   └── socketHandlers.js
-│   ├── services/            # External service integrations
-│   └── utils/               # Helper functions
-│       ├── telegramAuth.js
-│       └── gameLogic.js
+├── config/                  # Database and Redis configuration
+│   ├── database.js
+│   └── redis.js
+├── middleware/              # Authentication, error handling
+│   ├── auth.js
+│   └── errorHandler.js
+├── models/                  # MongoDB schemas
+│   ├── User.js
+│   ├── Room.js
+│   ├── Game.js
+│   └── Transaction.js
+├── controllers/             # ALL BUSINESS LOGIC HERE
+│   ├── authController.js
+│   ├── walletController.js
+│   ├── roomController.js
+│   ├── gameController.js
+│   └── adminController.js
+├── routes/                  # ENDPOINT MANAGEMENT ONLY
+│   ├── index.js
+│   ├── authRoutes.js
+│   ├── walletRoutes.js
+│   ├── roomRoutes.js
+│   ├── gameRoutes.js
+│   └── adminRoutes.js
+├── socket/                  # Socket.IO handlers
+│   └── socketHandlers.js
+├── services/                # External service integrations (future)
+└── utils/                   # Helper functions
+    ├── telegramAuth.js
+    └── gameLogic.js
 ```
 
 ## Installation
