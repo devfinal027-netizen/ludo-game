@@ -2,9 +2,8 @@
 
 const jwt = require('jsonwebtoken');
 const { createRoom, joinRoom, startGameIfFull, listRooms } = require('../services/RoomService');
-const { startGameSession, rollDice, applyMove } = require('../services/GameService');
-const { Game } = require('../models/Game');
 const { config } = require('../config/config');
+const gameController = require('../controllers/gameController');
 
 module.exports = function init(io, logger) {
   const nsp = io.of('/ludo');
@@ -63,7 +62,7 @@ module.exports = function init(io, logger) {
           nsp.to(room.roomId).emit('room:full', room);
           const startedRoom = await startGameIfFull({ roomId: room.roomId, logger });
           if (startedRoom) {
-            const game = await startGameSession(startedRoom.roomId, logger);
+            const game = await gameController.handleStartGame(startedRoom.roomId, logger);
             roomToGame.set(startedRoom.roomId, game.gameId);
             nsp.to(room.roomId).emit('game:start', { roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, players: game.players });
           }
@@ -89,12 +88,11 @@ module.exports = function init(io, logger) {
         if (!roomId) throw new Error('roomId required');
         let gameId = roomToGame.get(roomId);
         if (!gameId) {
-          const existing = await Game.findOne({ roomId, status: 'playing' }).lean();
-          if (!existing) throw new Error('Game not found');
-          gameId = existing.gameId;
+          gameId = await gameController.findPlayingGameIdByRoom(roomId);
+          if (!gameId) throw new Error('Game not found');
           roomToGame.set(roomId, gameId);
         }
-        const result = await rollDice(userId, gameId, logger);
+        const result = await gameController.handleDiceRoll(gameId, userId, logger);
         nsp.to(roomId).emit('dice:result', { roomId, gameId, ...result });
         cb && cb({ ok: true, ...result });
       } catch (err) {
@@ -108,12 +106,11 @@ module.exports = function init(io, logger) {
         if (!roomId) throw new Error('roomId required');
         let gameId = roomToGame.get(roomId);
         if (!gameId) {
-          const existing = await Game.findOne({ roomId, status: 'playing' }).lean();
-          if (!existing) throw new Error('Game not found');
-          gameId = existing.gameId;
+          gameId = await gameController.findPlayingGameIdByRoom(roomId);
+          if (!gameId) throw new Error('Game not found');
           roomToGame.set(roomId, gameId);
         }
-        const outcome = await applyMove(userId, gameId, Number(tokenIndex), Number(steps), logger);
+        const outcome = await gameController.handleTokenMove(gameId, Number(tokenIndex), Number(steps), userId, logger);
         if (outcome.ended) {
           nsp.to(roomId).emit('game:end', { roomId, gameId, winnerUserId: outcome.winnerUserId });
         } else if (outcome.skipped) {
@@ -133,9 +130,9 @@ module.exports = function init(io, logger) {
         let gameId = roomToGame.get(roomId);
         let game;
         if (gameId) {
-          game = await Game.findOne({ gameId });
+          game = await gameController.getGameDocument(gameId);
         } else {
-          game = await Game.findOne({ roomId }).lean();
+          game = await gameController.getLatestGameDocumentByRoom(roomId);
           if (game) roomToGame.set(roomId, game.gameId);
         }
         if (!game) return cb && cb({ ok: false, message: 'Game not found' });
