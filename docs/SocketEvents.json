@@ -1,0 +1,169 @@
+{
+  "namespace": "/ludo",
+  "auth": {
+    "type": "bearer-or-userId",
+    "bearer": "Authorization: Bearer <JWT>",
+    "devUser": "auth: { userId: '<id>' } (non-production)"
+  },
+  "events": [
+    {
+      "name": "session:create",
+      "direction": "client->server",
+      "payload": { "stake": "10|50|100", "mode": "Classic|Quick", "maxPlayers": "2|4" },
+      "ack": { "ok": true, "room": "Room" },
+      "broadcasts": [
+        { "event": "room:create", "payload": "Room" }
+      ]
+    },
+    {
+      "name": "room:create",
+      "direction": "client->server",
+      "payload": { "stake": "10|50|100", "mode": "Classic|Quick", "maxPlayers": "2|4" },
+      "ack": { "ok": true, "room": "Room" },
+      "broadcasts": [ { "event": "room:create", "payload": "Room" } ]
+    },
+    {
+      "name": "session:join",
+      "direction": "client->server",
+      "payload": { "roomId": "string" },
+      "ack": { "ok": true, "room": "Room" },
+      "broadcasts": [
+        { "event": "room:update", "payload": "Room" },
+        { "event": "room:full", "payload": "Room", "when": "room becomes full" },
+        { "event": "game:start", "payload": { "roomId": "string", "gameId": "string", "turnIndex": "number", "players": "Player[]" }, "when": "after start" }
+      ]
+    },
+    {
+      "name": "room:join",
+      "direction": "client->server",
+      "payload": { "roomId": "string" },
+      "ack": { "ok": true, "room": "Room" },
+      "broadcasts": [
+        { "event": "room:update", "payload": "Room" },
+        { "event": "room:full", "payload": "Room", "when": "room becomes full" },
+        { "event": "game:start", "payload": { "roomId": "string", "gameId": "string", "turnIndex": "number", "players": "Player[]" }, "when": "after start" }
+      ]
+    },
+    {
+      "name": "rooms:list",
+      "direction": "client->server",
+      "payload": {},
+      "ack": { "rooms": "Room[]" }
+    },
+    {
+      "name": "session:leave",
+      "direction": "client->server",
+      "payload": { "roomId?": "string" },
+      "ack": { "ok": true, "roomId?": "string", "leftAll?": true }
+    },
+    {
+      "name": "room:leave",
+      "direction": "client->server",
+      "payload": { "roomId?": "string" },
+      "ack": { "ok": true, "roomId?": "string", "leftAll?": true }
+    },
+    {
+      "name": "dice:roll",
+      "direction": "client->server",
+      "payload": { "roomId": "string" },
+      "ack": { "ok": true, "value": "1..6", "turnIndex": "number", "skipped": "boolean", "nextTurnIndex": "number" },
+      "broadcasts": [
+        { "event": "dice:result", "payload": { "roomId": "string", "gameId": "string", "value": "1..6", "turnIndex": "number", "skipped": "boolean", "nextTurnIndex": "number" } }
+      ]
+    },
+    {
+      "name": "token:move",
+      "direction": "client->server",
+      "payload": { "roomId": "string", "tokenIndex": "number", "steps": "number" },
+      "ack": { "ok": true, "ended?": true, "winnerUserId?": "string", "skipped?": true, "nextTurnIndex?": "number" },
+      "broadcasts": [
+        { "event": "game:end", "payload": { "roomId": "string", "gameId": "string", "winnerUserId": "string" }, "when": "if game ended" },
+        { "event": "turn:change", "payload": { "roomId": "string", "gameId": "string", "turnIndex": "number" }, "when": "if skipped or after move" },
+        { "event": "token:move", "payload": { "roomId": "string", "gameId": "string", "tokenIndex": "number", "steps": "number" }, "when": "on normal move" }
+      ]
+    },
+    {
+      "name": "game:get",
+      "direction": "client->server",
+      "payload": { "roomId": "string" },
+      "ack": { "ok": true, "game": "Game" }
+    },
+    {
+      "name": "room:create (server)",
+      "direction": "server->clients",
+      "payload": "Room"
+    },
+    {
+      "name": "room:update",
+      "direction": "server->room",
+      "payload": "Room"
+    },
+    {
+      "name": "room:full",
+      "direction": "server->room",
+      "payload": "Room"
+    },
+    {
+      "name": "game:start",
+      "direction": "server->room",
+      "payload": { "roomId": "string", "gameId": "string", "turnIndex": "number", "players": "Player[]" }
+    },
+    {
+      "name": "dice:result",
+      "direction": "server->room",
+      "payload": { "roomId": "string", "gameId": "string", "value": "1..6", "turnIndex": "number", "skipped": "boolean", "nextTurnIndex": "number" }
+    },
+    {
+      "name": "turn:change",
+      "direction": "server->room",
+      "payload": { "roomId": "string", "gameId": "string", "turnIndex": "number" }
+    },
+    {
+      "name": "game:end",
+      "direction": "server->room",
+      "payload": { "roomId": "string", "gameId": "string", "winnerUserId": "string" }
+    },
+    {
+      "name": "token:move (server)",
+      "direction": "server->room",
+      "payload": { "roomId": "string", "gameId": "string", "tokenIndex": "number", "steps": "number" }
+    },
+    {
+      "name": "disconnect",
+      "direction": "server-logs",
+      "payload": { "id": "socket.id", "reason": "string" }
+    }
+  ],
+  "types": {
+    "Room": {
+      "roomId": "string",
+      "stake": "10|50|100",
+      "mode": "Classic|Quick",
+      "maxPlayers": "2|4",
+      "status": "waiting|full|playing|ended|cancelled",
+      "players": [ { "userId": "string", "joinedAt": "ISO8601", "status": "joined|left" } ],
+      "startedAt?": "ISO8601",
+      "endedAt?": "ISO8601"
+    },
+    "Player": {
+      "userId": "string",
+      "color": "red|green|yellow|blue",
+      "tokens": [ { "tokenIndex": "number", "state": "base|track|homeStretch|home", "stepsFromStart": "number" } ]
+    },
+    "Game": {
+      "gameId": "string",
+      "roomId": "string",
+      "stake": "number",
+      "mode": "Classic|Quick",
+      "players": "Player[]",
+      "turnIndex": "number",
+      "status": "playing|ended|aborted",
+      "winnerUserId?": "string",
+      "rngSeed": "string",
+      "diceSeq": "number",
+      "moveSeq": "number",
+      "pendingDiceValue?": "number",
+      "pendingDicePlayerIndex?": "number"
+    }
+  }
+}
