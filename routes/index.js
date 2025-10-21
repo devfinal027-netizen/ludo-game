@@ -13,6 +13,7 @@ router.use('/auth', require('./authRoutes'));
 
 // Protected endpoints
 router.use('/users', auth(true), require('./userRoutes'));
+router.use('/rooms', auth(true), require('./roomsRoutes'));
 router.use('/admin', auth(true), require('./adminRoutes'));
 router.use('/games', auth(true), require('./gameRoutes'));
 
