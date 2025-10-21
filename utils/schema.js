@@ -14,6 +14,21 @@ const schemas = {
   roomJoin: Joi.object({
     roomId: Joi.string().required(),
   }),
+  gameStart: Joi.object({
+    roomId: Joi.string().required(),
+  }),
+  diceRoll: Joi.object({
+    gameId: Joi.string().required(),
+  }),
+  tokenMove: Joi.object({
+    gameId: Joi.string().required(),
+    tokenIndex: Joi.number().integer().min(0).required(),
+    steps: Joi.number().integer().min(1).max(6).required(),
+  }),
+  gameEnd: Joi.object({
+    gameId: Joi.string().required(),
+    winnerUserId: Joi.string().allow(null, '').optional(),
+  }),
 };
 
 module.exports = { schemas };

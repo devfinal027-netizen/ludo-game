@@ -8,6 +8,8 @@ const config = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   commissionPercent: Number(process.env.COMMISSION_PERCENT || 0.2),
   roomTimeoutSeconds: Number(process.env.ROOM_TIMEOUT_SECONDS || 300),
+  // Quick mode: number of tokens required to reach home to win
+  quickWinTokens: Number(process.env.QUICK_WIN_TOKENS || 2),
   allowedStakes: (process.env.ALLOWED_STAKES || '10,50,100')
     .split(',')
     .map((v) => Number(v.trim()))

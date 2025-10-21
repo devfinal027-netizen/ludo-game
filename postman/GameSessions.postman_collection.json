@@ -1,0 +1,79 @@
+{
+  "info": {
+    "_postman_id": "c5038d0d-8616-4c14-8e96-8e25e8bb7c0e",
+    "name": "Game Sessions",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Start Game",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{authToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/games/start", "host": ["{{baseUrl}}"], "path": ["api", "games", "start"] },
+        "body": { "mode": "raw", "raw": "{\n  \"roomId\": \"{{roomId}}\"\n}" }
+      }
+    },
+    {
+      "name": "Get Game",
+      "request": {
+        "method": "GET",
+        "header": [ { "key": "Authorization", "value": "Bearer {{authToken}}" } ],
+        "url": { "raw": "{{baseUrl}}/api/games/{{gameId}}", "host": ["{{baseUrl}}"], "path": ["api", "games", "{{gameId}}"] }
+      }
+    },
+    {
+      "name": "Get Current Game by Room",
+      "request": {
+        "method": "GET",
+        "header": [ { "key": "Authorization", "value": "Bearer {{authToken}}" } ],
+        "url": { "raw": "{{baseUrl}}/api/games/room/{{roomId}}/current", "host": ["{{baseUrl}}"], "path": ["api", "games", "room", "{{roomId}}", "current"] }
+      }
+    },
+    {
+      "name": "Roll Dice",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{authToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/games/dice/roll", "host": ["{{baseUrl}}"], "path": ["api", "games", "dice", "roll"] },
+        "body": { "mode": "raw", "raw": "{\n  \"gameId\": \"{{gameId}}\"\n}" }
+      }
+    },
+    {
+      "name": "Move Token",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{authToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/games/token/move", "host": ["{{baseUrl}}"], "path": ["api", "games", "token", "move"] },
+        "body": { "mode": "raw", "raw": "{\n  \"gameId\": \"{{gameId}}\",\n  \"tokenIndex\": 0,\n  \"steps\": 6\n}" }
+      }
+    },
+    {
+      "name": "End Game",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{authToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/games/end", "host": ["{{baseUrl}}"], "path": ["api", "games", "end"] },
+        "body": { "mode": "raw", "raw": "{\n  \"gameId\": \"{{gameId}}\",\n  \"winnerUserId\": null\n}" }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "authToken", "value": "" },
+    { "key": "roomId", "value": "" },
+    { "key": "gameId", "value": "" }
+  ]
+}

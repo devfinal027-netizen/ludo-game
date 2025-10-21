@@ -1,10 +1,13 @@
 'use strict';
 
-const express = require('express');
 const { Game } = require('../models/Game');
-const router = express.Router();
+const { startGameSession, rollDice, applyMove, endGameSession } = require('../services/GameService');
 
-router.get('/:gameId', async (req, res, next) => {
+// ----------------------
+// Express route handlers
+// ----------------------
+
+async function getGame(req, res, next) {
   try {
     const game = await Game.findOne({ gameId: req.params.gameId }).lean();
     if (!game) return res.status(404).json({ message: 'Game not found' });
@@ -12,9 +15,9 @@ router.get('/:gameId', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}
 
-router.get('/room/:roomId/current', async (req, res, next) => {
+async function getCurrentByRoom(req, res, next) {
   try {
     const game = await Game.findOne({ roomId: req.params.roomId }).sort({ createdAt: -1 }).lean();
     if (!game) return res.status(404).json({ message: 'Game not found' });
@@ -22,6 +25,97 @@ router.get('/room/:roomId/current', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}
 
-module.exports = router;
+async function start(req, res, next) {
+  try {
+    const { roomId } = req.validated;
+    const game = await startGameSession(roomId, req.app.get('logger'));
+    res.json(game);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function roll(req, res, next) {
+  try {
+    const { gameId } = req.validated;
+    const userId = req.user.userId;
+    const result = await rollDice(userId, gameId, req.app.get('logger'));
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function move(req, res, next) {
+  try {
+    const { gameId, tokenIndex, steps } = req.validated;
+    const userId = req.user.userId;
+    const outcome = await applyMove(userId, gameId, Number(tokenIndex), Number(steps), req.app.get('logger'));
+    res.json(outcome);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function end(req, res, next) {
+  try {
+    const { gameId, winnerUserId } = req.validated;
+    const game = await endGameSession(gameId, winnerUserId || null, req.app.get('logger'));
+    res.json(game);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ----------------------
+// Reusable controller methods (for Socket.IO and internal calls)
+// ----------------------
+
+async function handleStartGame(roomId, logger) {
+  return await startGameSession(roomId, logger);
+}
+
+async function handleDiceRoll(gameId, userId, logger) {
+  return await rollDice(userId, gameId, logger);
+}
+
+async function handleTokenMove(gameId, tokenIndex, steps, userId, logger) {
+  return await applyMove(userId, gameId, Number(tokenIndex), Number(steps), logger);
+}
+
+async function handleEndGame(gameId, winnerUserId, logger) {
+  return await endGameSession(gameId, winnerUserId || null, logger);
+}
+
+async function findPlayingGameIdByRoom(roomId) {
+  const existing = await Game.findOne({ roomId, status: 'playing' }, { gameId: 1 }).lean();
+  return existing ? existing.gameId : null;
+}
+
+async function getGameDocument(gameId) {
+  return await Game.findOne({ gameId }).lean();
+}
+
+async function getLatestGameDocumentByRoom(roomId) {
+  return await Game.findOne({ roomId }).sort({ createdAt: -1 }).lean();
+}
+
+module.exports = {
+  // Express handlers
+  getGame,
+  getCurrentByRoom,
+  start,
+  roll,
+  move,
+  end,
+  // Reusable methods
+  handleStartGame,
+  handleDiceRoll,
+  handleTokenMove,
+  handleEndGame,
+  findPlayingGameIdByRoom,
+  getGameDocument,
+  getLatestGameDocumentByRoom,
+};
