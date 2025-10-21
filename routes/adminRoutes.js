@@ -1,10 +1,9 @@
 'use strict';
 
 const express = require('express');
+const adminController = require('../controllers/adminController');
 const router = express.Router();
 
-router.get('/health', (req, res) => {
-  res.json({ ok: true });
-});
+router.get('/health', adminController.health);
 
 module.exports = router;
