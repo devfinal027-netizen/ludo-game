@@ -1,16 +1,32 @@
 'use strict';
 
-const { createRoom, joinRoom, startGameIfFull } = require('../services/RoomService');
+const jwt = require('jsonwebtoken');
+const { createRoom, joinRoom, startGameIfFull, listRooms } = require('../services/RoomService');
+const { config } = require('../config/config');
 
 module.exports = function init(io, logger) {
   const nsp = io.of('/ludo');
 
+  // Auth guard for namespace
+  nsp.use((socket, next) => {
+    try {
+      const raw = socket.handshake.auth?.token || socket.handshake.headers?.authorization || '';
+      const token = raw.startsWith('Bearer ') ? raw.slice(7) : raw;
+      if (!token) return next(new Error('Unauthorized'));
+      const payload = jwt.verify(token, config.jwtSecret);
+      socket.user = { userId: payload.userId };
+      return next();
+    } catch (err) {
+      return next(new Error('Unauthorized'));
+    }
+  });
+
   nsp.on('connection', (socket) => {
     logger.info('socket connected', { id: socket.id });
 
-    socket.on('session:create', async (payload, cb) => {
+    async function handleCreate(payload, cb) {
       try {
-        const userId = socket.handshake.auth?.userId || 'dev-user';
+        const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
         const room = await createRoom({ ...payload, creatorUserId: userId, logger });
         socket.join(room.roomId);
         nsp.emit('room:create', room);
@@ -18,11 +34,14 @@ module.exports = function init(io, logger) {
       } catch (err) {
         cb && cb({ ok: false, message: err.message });
       }
-    });
+    }
 
-    socket.on('session:join', async (payload, cb) => {
+    socket.on('session:create', handleCreate);
+    socket.on('room:create', handleCreate);
+
+    async function handleJoin(payload, cb) {
       const { roomId } = payload || {};
-      const userId = socket.handshake.auth?.userId || 'dev-user';
+      const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
       const room = await joinRoom({ roomId, userId, logger });
       if (!room) return cb && cb({ ok: false, message: 'Room not available' });
       socket.join(room.roomId);
@@ -33,10 +52,14 @@ module.exports = function init(io, logger) {
         if (started) nsp.to(room.roomId).emit('game:start', { roomId: started.roomId });
       }
       cb && cb({ ok: true, room });
-    });
+    }
 
-    socket.on('rooms:list', (_payload, cb) => {
-      cb && cb({ rooms: [] });
+    socket.on('session:join', handleJoin);
+    socket.on('room:join', handleJoin);
+
+    socket.on('rooms:list', async (_payload, cb) => {
+      const rooms = await listRooms({ status: 'waiting' });
+      cb && cb({ rooms });
     });
 
     socket.on('disconnect', (reason) => {
