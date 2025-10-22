@@ -25,6 +25,30 @@ export const moveToken = createAsyncThunk('game/moveToken', async ({ roomId, tok
   }
 });
 
+export const autoMove = createAsyncThunk('game/autoMove', async ({ roomId }, { rejectWithValue }) => {
+  try {
+    const s = getSocket();
+    if (!s) throw new Error('Socket not connected');
+    const ack = await new Promise((res) => s.emit('token:auto', { roomId }, res));
+    if (!ack?.ok) throw new Error(ack?.message || 'Auto move failed');
+    return ack;
+  } catch (err) {
+    return rejectWithValue(err.message || 'Auto move failed');
+  }
+});
+
+export const fetchGame = createAsyncThunk('game/fetchGame', async ({ roomId }, { rejectWithValue }) => {
+  try {
+    const s = getSocket();
+    if (!s) throw new Error('Socket not connected');
+    const ack = await new Promise((res) => s.emit('game:get', { roomId }, res));
+    if (!ack?.ok) throw new Error(ack?.message || 'Game not found');
+    return ack.game;
+  } catch (err) {
+    return rejectWithValue(err.message || 'Fetch game failed');
+  }
+});
+
 const initialState = {
   game: null,
   turnIndex: 0,
@@ -83,6 +107,21 @@ const gameSlice = createSlice({
       .addCase(moveToken.rejected, (state, action) => {
         state.status = 'idle';
         state.error = action.payload;
+      })
+      .addCase(autoMove.pending, (state) => {
+        state.status = 'moving';
+        state.error = null;
+      })
+      .addCase(autoMove.fulfilled, (state) => {
+        state.status = 'idle';
+      })
+      .addCase(autoMove.rejected, (state, action) => {
+        state.status = 'idle';
+        state.error = action.payload;
+      })
+      .addCase(fetchGame.fulfilled, (state, action) => {
+        state.game = action.payload || state.game;
+        if (action.payload?.turnIndex != null) state.turnIndex = action.payload.turnIndex;
       });
   },
 });

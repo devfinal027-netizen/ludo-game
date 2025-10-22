@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { rollDice, moveToken } from '../features/game/gameSlice';
+import { rollDice, moveToken, autoMove, fetchGame } from '../features/game/gameSlice';
 import BoardRenderer from '../board/BoardRenderer.jsx';
 
 export default function Game() {
@@ -31,6 +31,11 @@ export default function Game() {
     }
   }, [dispatch, roomId]);
 
+  // Ensure we have latest game after mount
+  useEffect(() => {
+    if (roomId) dispatch(fetchGame({ roomId }));
+  }, [dispatch, roomId]);
+
   return (
     <div className="p-6 space-y-3">
       <h2 className="text-xl font-semibold">Game</h2>
@@ -40,6 +45,9 @@ export default function Game() {
           Roll Dice
         </button>
         <span className="text-sm">Last dice: {lastDice ?? '-'}</span>
+        <button className="underline text-sm disabled:opacity-50" disabled={status !== 'idle' || !roomId} onClick={() => dispatch(autoMove({ roomId }))}>
+          Auto move
+        </button>
       </div>
       {error && <p className="text-red-500 text-sm">{error}</p>}
       <BoardRenderer />
