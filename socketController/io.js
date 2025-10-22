@@ -2,6 +2,7 @@
 
 const jwt = require('jsonwebtoken');
 const { createRoom, joinRoom, startGameIfFull, listRooms } = require('../services/RoomService');
+const GameService = require('../services/GameService');
 const { config } = require('../config/config');
 const gameController = require('../controllers/gameController');
 
@@ -18,7 +19,9 @@ module.exports = function init(io, logger) {
       const token = raw.startsWith('Bearer ') ? raw.slice(7) : raw;
       if (token) {
         const payload = jwt.verify(token, config.jwtSecret);
-        socket.user = { userId: payload.userId };
+        const userId = payload.userId || payload.id || payload._id;
+        if (!userId) return next(new Error('Unauthorized'));
+        socket.user = { userId: String(userId) };
         return next();
       }
       const testUserId = socket.handshake.auth?.userId;
@@ -33,16 +36,21 @@ module.exports = function init(io, logger) {
   });
 
   nsp.on('connection', (socket) => {
-    logger.info('socket connected', { id: socket.id });
+    logger.info('socket:connected', { socketId: socket.id, userId: socket.user?.userId });
 
     async function handleCreate(payload, cb) {
       try {
         const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
+        logger.info('socket:event:receive', { event: 'room|session:create', socketId: socket.id, userId, payload });
         const room = await createRoom({ ...payload, creatorUserId: userId, logger });
         socket.join(room.roomId);
+        logger.info('socket:event:emit', { event: 'room:create', roomId: room.roomId, players: room.players.length });
         nsp.emit('room:create', room);
-        cb && cb({ ok: true, room });
+        const ack = { ok: true, room };
+        logger.info('socket:event:ack', { event: 'room|session:create', ok: true, roomId: room.roomId, to: socket.id });
+        cb && cb(ack);
       } catch (err) {
+        logger.error('socket:event:error', { event: 'room|session:create', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
       }
     }
@@ -54,21 +62,28 @@ module.exports = function init(io, logger) {
       try {
         const { roomId } = payload || {};
         const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
+        logger.info('socket:event:receive', { event: 'room|session:join', socketId: socket.id, userId, roomId });
         const room = await joinRoom({ roomId, userId, logger });
         if (!room) return cb && cb({ ok: false, message: 'Room not available' });
         socket.join(room.roomId);
+        logger.info('socket:event:emit', { event: 'room:update', roomId: room.roomId, players: room.players.length });
         nsp.to(room.roomId).emit('room:update', room);
         if (room.status === 'full') {
+          logger.info('socket:event:emit', { event: 'room:full', roomId: room.roomId });
           nsp.to(room.roomId).emit('room:full', room);
           const startedRoom = await startGameIfFull({ roomId: room.roomId, logger });
           if (startedRoom) {
             const game = await gameController.handleStartGame(startedRoom.roomId, logger);
             roomToGame.set(startedRoom.roomId, game.gameId);
-            nsp.to(room.roomId).emit('game:start', { roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, players: game.players });
+            const payload = { roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, players: game.players };
+            logger.info('socket:event:emit', { event: 'game:start', roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex });
+            nsp.to(room.roomId).emit('game:start', payload);
           }
         }
+        logger.info('socket:event:ack', { event: 'room|session:join', ok: true, roomId: room.roomId, to: socket.id });
         cb && cb({ ok: true, room });
       } catch (err) {
+        logger.error('socket:event:error', { event: 'room|session:join', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
       }
     }
@@ -77,14 +92,22 @@ module.exports = function init(io, logger) {
     socket.on('room:join', handleJoin);
 
     socket.on('rooms:list', async (_payload, cb) => {
-      const rooms = await listRooms({ status: 'waiting' });
-      cb && cb({ rooms });
+      try {
+        logger.info('socket:event:receive', { event: 'rooms:list', socketId: socket.id });
+        const rooms = await listRooms({ status: 'waiting' });
+        logger.info('socket:event:ack', { event: 'rooms:list', count: rooms.length, to: socket.id });
+        cb && cb({ rooms });
+      } catch (err) {
+        logger.error('socket:event:error', { event: 'rooms:list', error: err.message, socketId: socket.id });
+        cb && cb({ rooms: [] });
+      }
     });
 
     // Leave socket rooms
     async function handleLeave(payload, cb) {
       try {
         const { roomId } = payload || {};
+        logger.info('socket:event:receive', { event: 'room|session:leave', socketId: socket.id, roomId });
         if (roomId) {
           await socket.leave(roomId);
           logger.info('room:leave', { socketId: socket.id, roomId });
@@ -100,6 +123,7 @@ module.exports = function init(io, logger) {
         logger.info('room:leaveAll', { socketId: socket.id, rooms: joined.filter((r) => r !== socket.id) });
         cb && cb({ ok: true, leftAll: true });
       } catch (err) {
+        logger.error('socket:event:error', { event: 'room|session:leave', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
       }
     }
@@ -111,6 +135,7 @@ module.exports = function init(io, logger) {
     socket.on('dice:roll', async ({ roomId }, cb) => {
       try {
         const userId = socket.user?.userId;
+        logger.info('socket:event:receive', { event: 'dice:roll', socketId: socket.id, userId, roomId });
         if (!roomId) throw new Error('roomId required');
         let gameId = roomToGame.get(roomId);
         if (!gameId) {
@@ -119,9 +144,114 @@ module.exports = function init(io, logger) {
           roomToGame.set(roomId, gameId);
         }
         const result = await gameController.handleDiceRoll(gameId, userId, logger);
+        logger.info('socket:event:emit', { event: 'dice:result', roomId, gameId, value: result.value, skipped: result.skipped });
         nsp.to(roomId).emit('dice:result', { roomId, gameId, ...result });
-        cb && cb({ ok: true, ...result });
+        if (result.skipped) {
+          const nextIdx = result.turnIndex; // after skip, turnIndex already rotated
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: nextIdx, reason: 'skip' });
+          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: nextIdx });
+        }
+        const mustMove = !result.skipped;
+        let legalTokens = [];
+        if (mustMove) {
+          try {
+            const game = await gameController.getGameDocument(gameId);
+            const player = game.players[result.turnIndex];
+            for (const t of player.tokens) {
+              try {
+                // simulate move on a shallow clone
+                const tokenClone = { tokenIndex: t.tokenIndex, state: t.state, stepsFromStart: t.stepsFromStart };
+                GameService._internals.applyMoveOnToken(tokenClone, result.value);
+                legalTokens.push(t.tokenIndex);
+              } catch (_e) {
+                // not legal; ignore
+              }
+            }
+          } catch (_e) {}
+        }
+        logger.info('socket:event:ack', { event: 'dice:roll', ok: true, to: socket.id, mustMove, legalTokensCount: legalTokens.length });
+        cb && cb({ ok: true, gameId, mustMove, legalTokens, ...result });
       } catch (err) {
+        // Provide structured error codes to help clients
+        let code = 'UNKNOWN';
+        let extra = {};
+        if (err && err.message === 'Pending move exists') {
+          code = 'PENDING_MOVE';
+          try {
+            // Look up current game to return pending dice info
+            let gameId = roomToGame.get(roomId);
+            if (!gameId) gameId = await gameController.findPlayingGameIdByRoom(roomId);
+            if (gameId) {
+              const game = await gameController.getGameDocument(gameId);
+              if (game) extra = { gameId, pendingDiceValue: game.pendingDiceValue, turnIndex: game.turnIndex };
+            }
+          } catch (_e) {}
+        } else if (err && err.message === 'Not your turn') {
+          code = 'NOT_YOUR_TURN';
+          try {
+            let gameId = roomToGame.get(roomId);
+            if (!gameId) gameId = await gameController.findPlayingGameIdByRoom(roomId);
+            if (gameId) {
+              const game = await gameController.getGameDocument(gameId);
+              if (game) extra = { gameId, turnIndex: game.turnIndex };
+            }
+          } catch (_e) {}
+        }
+        logger.error('socket:event:error', { event: 'dice:roll', error: err.message, code, socketId: socket.id, ...extra });
+        cb && cb({ ok: false, code, message: err.message, ...extra });
+      }
+    });
+
+    // Auto move helper: server chooses the first legal token
+    socket.on('token:auto', async ({ roomId }, cb) => {
+      try {
+        const userId = socket.user?.userId;
+        logger.info('socket:event:receive', { event: 'token:auto', socketId: socket.id, userId, roomId });
+        if (!roomId) throw new Error('roomId required');
+        let gameId = roomToGame.get(roomId);
+        if (!gameId) {
+          gameId = await gameController.findPlayingGameIdByRoom(roomId);
+          if (!gameId) throw new Error('Game not found');
+          roomToGame.set(roomId, gameId);
+        }
+        const game = await gameController.getGameDocument(gameId);
+        if (!game) throw new Error('Game not found');
+        if (String(game.players[game.turnIndex].userId) !== String(userId)) throw new Error('Not your turn');
+        if (game.pendingDiceValue == null) throw new Error('No pending dice');
+        const value = game.pendingDiceValue;
+        const player = game.players[game.turnIndex];
+        let chosen = null;
+        for (const t of player.tokens) {
+          try {
+            const tokenClone = { tokenIndex: t.tokenIndex, state: t.state, stepsFromStart: t.stepsFromStart };
+            GameService._internals.applyMoveOnToken(tokenClone, value);
+            chosen = t.tokenIndex;
+            break;
+          } catch (_e) {}
+        }
+        if (chosen == null) {
+          // No legal move; fallback to skip via applyMove path which will rotate turn
+          const outcome = await gameController.handleTokenMove(gameId, 0, value, userId, logger);
+          logger.info('socket:event:ack', { event: 'token:auto', ok: true, to: socket.id, skipped: outcome.skipped });
+          return cb && cb({ ok: true, gameId, ...outcome });
+        }
+        const outcome = await gameController.handleTokenMove(gameId, Number(chosen), Number(value), userId, logger);
+        if (outcome.ended) {
+          logger.info('socket:event:emit', { event: 'game:end', roomId, gameId, winnerUserId: outcome.winnerUserId });
+          nsp.to(roomId).emit('game:end', { roomId, gameId, winnerUserId: outcome.winnerUserId });
+        } else if (outcome.skipped) {
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
+          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
+        } else {
+          logger.info('socket:event:emit', { event: 'token:move', roomId, gameId, tokenIndex: Number(chosen), steps: Number(value) });
+          nsp.to(roomId).emit('token:move', { roomId, gameId, tokenIndex: Number(chosen), steps: Number(value) });
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
+          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
+        }
+        logger.info('socket:event:ack', { event: 'token:auto', ok: true, to: socket.id, tokenIndex: chosen, steps: value });
+        cb && cb({ ok: true, gameId, tokenIndex: chosen, steps: value, ...outcome });
+      } catch (err) {
+        logger.error('socket:event:error', { event: 'token:auto', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
       }
     });
@@ -129,6 +259,7 @@ module.exports = function init(io, logger) {
     socket.on('token:move', async ({ roomId, tokenIndex, steps }, cb) => {
       try {
         const userId = socket.user?.userId;
+        logger.info('socket:event:receive', { event: 'token:move', socketId: socket.id, userId, roomId, tokenIndex, steps });
         if (!roomId) throw new Error('roomId required');
         let gameId = roomToGame.get(roomId);
         if (!gameId) {
@@ -138,21 +269,28 @@ module.exports = function init(io, logger) {
         }
         const outcome = await gameController.handleTokenMove(gameId, Number(tokenIndex), Number(steps), userId, logger);
         if (outcome.ended) {
+          logger.info('socket:event:emit', { event: 'game:end', roomId, gameId, winnerUserId: outcome.winnerUserId });
           nsp.to(roomId).emit('game:end', { roomId, gameId, winnerUserId: outcome.winnerUserId });
         } else if (outcome.skipped) {
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
           nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
         } else {
+          logger.info('socket:event:emit', { event: 'token:move', roomId, gameId, tokenIndex: Number(tokenIndex), steps: Number(steps) });
           nsp.to(roomId).emit('token:move', { roomId, gameId, tokenIndex: Number(tokenIndex), steps: Number(steps) });
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
           nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
         }
-        cb && cb({ ok: true, ...outcome });
+        logger.info('socket:event:ack', { event: 'token:move', ok: true, to: socket.id });
+        cb && cb({ ok: true, gameId, ...outcome });
       } catch (err) {
+        logger.error('socket:event:error', { event: 'token:move', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
       }
     });
 
     socket.on('game:get', async ({ roomId }, cb) => {
       try {
+        logger.info('socket:event:receive', { event: 'game:get', socketId: socket.id, roomId });
         let gameId = roomToGame.get(roomId);
         let game;
         if (gameId) {
@@ -162,14 +300,16 @@ module.exports = function init(io, logger) {
           if (game) roomToGame.set(roomId, game.gameId);
         }
         if (!game) return cb && cb({ ok: false, message: 'Game not found' });
+        logger.info('socket:event:ack', { event: 'game:get', ok: true, to: socket.id, gameId: game.gameId });
         cb && cb({ ok: true, game });
       } catch (err) {
+        logger.error('socket:event:error', { event: 'game:get', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
       }
     });
 
     socket.on('disconnect', (reason) => {
-      logger.info('socket disconnected', { id: socket.id, reason });
+      logger.info('socket:disconnected', { socketId: socket.id, reason });
     });
   });
 };

@@ -1,0 +1,419 @@
+{
+  "info": {
+    "_postman_id": "f3e1d1b2-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+    "name": "Ludo Backend - All Endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Complete HTTP API collection for auth, users, rooms, games, and admin."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /api/auth/telegram (webapp initData)",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/telegram",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "telegram"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"initData\": \"query_id=...&user=%7B%5C\"id%5C\":12345%7D&hash=...\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/telegram/login",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/telegram/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "telegram", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telegramId\": \"123456789\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/register",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telegramId\": \"123456789\",\n  \"fullName\": \"Alice Example\",\n  \"phone\": \"+251912345678\",\n  \"password\": \"secret123\",\n  \"invitedBy\": \"abcd12ef\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/login",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+251912345678\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/auth/me",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /api/auth/me",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Alice Updated\",\n  \"phone\": \"+251987654321\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /api/auth/me",
+          "request": {
+            "method": "DELETE",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/auth/me/invited",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me/invited",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me", "invited"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/me/change-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me/change-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "me", "change-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"secret123\",\n  \"newPassword\": \"newSecret456\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/forgot-password",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/forgot-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "forgot-password"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+251912345678\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/reset-password/:token",
+          "request": {
+            "method": "POST",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/reset-password/{{resetToken}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "reset-password", "{{resetToken}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"newSecret456\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /api/auth/telegram/name/:telegramId",
+          "request": {
+            "method": "PUT",
+            "header": [ {"key": "Content-Type", "value": "application/json"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/telegram/name/123456789",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "telegram", "name", "123456789"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Alice Example\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/auth/admin/register-agent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/admin/register-agent",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "admin", "register-agent"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telegramId\": \"999999\",\n  \"fullName\": \"Agent Alice\",\n  \"phone\": \"+251911223344\",\n  \"password\": \"secret123\",\n  \"initialWallet\": 100\n}"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "GET /api/users/me",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "me"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "POST /api/rooms/create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {"raw": "{{baseUrl}}/api/rooms/create", "host": ["{{baseUrl}}"], "path": ["api","rooms","create"]},
+            "body": {"mode": "raw", "raw": "{\n  \"stake\": 10,\n  \"mode\": \"Classic\",\n  \"maxPlayers\": 2\n}"}
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/rooms/join",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {"raw": "{{baseUrl}}/api/rooms/join", "host": ["{{baseUrl}}"], "path": ["api","rooms","join"]},
+            "body": {"mode": "raw", "raw": "{\n  \"roomId\": \"<room-id>\"\n}"}
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/rooms",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/rooms?status=waiting",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "rooms"],
+              "query": [ {"key": "status", "value": "waiting"} ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Games",
+      "item": [
+        {
+          "name": "GET /api/games/:gameId",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/{{gameId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "{{gameId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/games/room/:roomId/current",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/room/{{roomId}}/current",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "room", "{{roomId}}", "current"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/games/start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {"raw": "{{baseUrl}}/api/games/start", "host": ["{{baseUrl}}"], "path": ["api","games","start"]},
+            "body": {"mode": "raw", "raw": "{\n  \"roomId\": \"<room-id>\"\n}"}
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/games/dice/roll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {"raw": "{{baseUrl}}/api/games/dice/roll", "host": ["{{baseUrl}}"], "path": ["api","games","dice","roll"]},
+            "body": {"mode": "raw", "raw": "{\n  \"gameId\": \"<game-id>\"\n}"}
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/games/token/move",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {"raw": "{{baseUrl}}/api/games/token/move", "host": ["{{baseUrl}}"], "path": ["api","games","token","move"]},
+            "body": {"mode": "raw", "raw": "{\n  \"gameId\": \"<game-id>\",\n  \"tokenIndex\": 0,\n  \"steps\": 6\n}"}
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/games/end",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"},
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "url": {"raw": "{{baseUrl}}/api/games/end", "host": ["{{baseUrl}}"], "path": ["api","games","end"]},
+            "body": {"mode": "raw", "raw": "{\n  \"gameId\": \"<game-id>\",\n  \"winnerUserId\": \"<user-id>|null\"\n}"}
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "GET /api/admin/health",
+          "request": {
+            "method": "GET",
+            "header": [ {"key": "Authorization", "value": "Bearer {{token}}"} ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "admin", "health"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

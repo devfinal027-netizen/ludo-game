@@ -24,7 +24,7 @@ const RoomSchema = new mongoose.Schema(
     maxPlayers: { type: Number, enum: [2, 4], required: true },
     status: {
       type: String,
-      enum: ['waiting', 'playing', 'ended', 'cancelled'],
+      enum: ['waiting', 'full', 'playing', 'ended', 'cancelled'],
       required: true,
       default: 'waiting',
       index: true,
