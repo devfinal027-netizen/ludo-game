@@ -79,6 +79,7 @@ const validateTelegramInitData = (initData) => {
 async function telegramAuth(req, res) {
   try {
     const { initData } = req.body;
+    req.app.get('logger')?.info('http:auth:telegramAuth', {});
     if (!initData || !validateTelegramInitData(initData)) {
       return res.status(401).json({ message: 'Invalid Telegram authentication data' });
     }
@@ -124,6 +125,7 @@ async function telegramAuth(req, res) {
 async function telegramLogin(req, res) {
   try {
     const { telegramId } = req.body;
+    req.app.get('logger')?.info('http:auth:telegramLogin', { telegramId });
     if (!telegramId) return res.status(400).json({ message: 'Telegram ID is required' });
 
     const user = await User.findOne({ telegramId });
@@ -143,6 +145,7 @@ async function telegramLogin(req, res) {
 async function register(req, res) {
   try {
     let { phone } = req.body;
+    req.app.get('logger')?.info('http:auth:register', { telegramId: req.body.telegramId });
     if (!phone) return res.status(400).json({ message: 'Phone number is required' });
 
     let normalizedPhone = phone.trim().replace(/[\s-]/g, '');
@@ -270,6 +273,7 @@ async function register(req, res) {
 async function login(req, res) {
   try {
     const { phone: rawPhone, password } = req.body;
+    req.app.get('logger')?.info('http:auth:login', { phone: rawPhone && String(rawPhone).slice(0, 6) + '***' });
     let normalizedPhone = rawPhone.trim().replace(/[\s-]/g, '');
     if (normalizedPhone.startsWith('09') || normalizedPhone.startsWith('07')) {
       normalizedPhone = `+251${normalizedPhone.slice(1)}`;
@@ -320,6 +324,7 @@ async function login(req, res) {
 
 async function getProfile(req, res) {
   try {
+    req.app.get('logger')?.info('http:auth:getProfile', { userId: req.user.id });
     const user = await User.findById(req.user.id).select('-password');
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.status(200).json({ user });
@@ -333,6 +338,7 @@ async function updateProfile(req, res) {
   const { error } = updateProfileSchema.validate(req.body);
   if (error) return res.status(400).json({ message: error.details[0].message });
   try {
+    req.app.get('logger')?.info('http:auth:updateProfile', { userId: req.user.id });
     const { fullName, phone } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -361,6 +367,7 @@ async function updateFullName(req, res) {
   const { fullName } = req.body;
   if (!fullName) return res.status(400).json({ message: 'Full name is required' });
   try {
+    req.app.get('logger')?.info('http:auth:updateFullName', { telegramId });
     const user = await User.findOne({ telegramId });
     if (!user) return res.status(404).json({ message: 'User not found' });
     user.fullName = fullName;
@@ -376,6 +383,7 @@ async function deleteAccount(req, res) {
   const { error } = paramsSchema.validate({ id: req.user.id });
   if (error) return res.status(400).json({ message: error.details[0].message });
   try {
+    req.app.get('logger')?.info('http:auth:deleteAccount', { userId: req.user.id });
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     await User.findByIdAndDelete(req.user.id);
@@ -391,6 +399,7 @@ async function getInvitedUsers(req, res) {
   const { error } = paramsSchema.validate({ id: req.user.id });
   if (error) return res.status(400).json({ message: error.details[0].message });
   try {
+    req.app.get('logger')?.info('http:auth:getInvitedUsers', { userId: req.user.id });
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -408,6 +417,7 @@ async function getInvitedUsers(req, res) {
 async function changePassword(req, res) {
   try {
     const { currentPassword, newPassword } = req.body;
+    req.app.get('logger')?.info('http:auth:changePassword', { userId: req.user.id });
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
     const isMatch = await user.verifyPassword(currentPassword);
@@ -425,6 +435,7 @@ async function changePassword(req, res) {
 async function forgotPassword(req, res) {
   try {
     const { phone } = req.body;
+    req.app.get('logger')?.info('http:auth:forgotPassword', { phone: String(phone || '').slice(0, 6) + '***' });
     const user = await User.findOne({ phone });
     if (!user) return res.status(404).json({ message: 'User not found' });
     const token = generateToken(user._id, user.role);
@@ -439,6 +450,7 @@ async function resetPassword(req, res) {
   try {
     const { error } = tokenParamsSchema.validate(req.params);
     if (error) return res.status(400).json({ message: error.details[0].message });
+    req.app.get('logger')?.info('http:auth:resetPassword', { token: String(req.params.token || '').slice(0, 8) + '***' });
     const { token } = req.params;
     const { password } = req.body;
     const decoded = jwt.verify(token, config.jwtSecret);
@@ -457,6 +469,7 @@ async function resetPassword(req, res) {
 async function registerAgent(req, res) {
   try {
     const { telegramId, fullName, phone, password, initialWallet } = req.body;
+    req.app.get('logger')?.info('http:auth:registerAgent', { telegramId, fullName });
     if (!telegramId || !phone) return res.status(400).json({ message: 'telegramId and phone are required' });
 
     let normalizedPhone = phone.trim().replace(/\s|-/g, '');

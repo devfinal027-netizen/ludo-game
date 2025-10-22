@@ -30,7 +30,9 @@ async function getCurrentByRoom(req, res, next) {
 async function start(req, res, next) {
   try {
     const { roomId } = req.validated;
-    const game = await startGameSession(roomId, req.app.get('logger'));
+    const logger = req.app.get('logger');
+    logger && logger.info('http:games:start', { roomId, userId: req.user.userId });
+    const game = await startGameSession(roomId, logger);
     res.json(game);
   } catch (err) {
     next(err);
@@ -41,7 +43,9 @@ async function roll(req, res, next) {
   try {
     const { gameId } = req.validated;
     const userId = req.user.userId;
-    const result = await rollDice(userId, gameId, req.app.get('logger'));
+    const logger = req.app.get('logger');
+    logger && logger.info('http:games:roll', { gameId, userId });
+    const result = await rollDice(userId, gameId, logger);
     res.json(result);
   } catch (err) {
     next(err);
@@ -52,7 +56,9 @@ async function move(req, res, next) {
   try {
     const { gameId, tokenIndex, steps } = req.validated;
     const userId = req.user.userId;
-    const outcome = await applyMove(userId, gameId, Number(tokenIndex), Number(steps), req.app.get('logger'));
+    const logger = req.app.get('logger');
+    logger && logger.info('http:games:move', { gameId, userId, tokenIndex: Number(tokenIndex), steps: Number(steps) });
+    const outcome = await applyMove(userId, gameId, Number(tokenIndex), Number(steps), logger);
     res.json(outcome);
   } catch (err) {
     next(err);
@@ -62,7 +68,9 @@ async function move(req, res, next) {
 async function end(req, res, next) {
   try {
     const { gameId, winnerUserId } = req.validated;
-    const game = await endGameSession(gameId, winnerUserId || null, req.app.get('logger'));
+    const logger = req.app.get('logger');
+    logger && logger.info('http:games:end', { gameId, winnerUserId: winnerUserId || null, userId: req.user.userId });
+    const game = await endGameSession(gameId, winnerUserId || null, logger);
     res.json(game);
   } catch (err) {
     next(err);
