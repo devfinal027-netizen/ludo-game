@@ -145,11 +145,42 @@ module.exports = function init(io, logger) {
         const result = await gameController.handleDiceRoll(gameId, userId, logger);
         logger.info('socket:event:emit', { event: 'dice:result', roomId, gameId, value: result.value, skipped: result.skipped });
         nsp.to(roomId).emit('dice:result', { roomId, gameId, ...result });
-        logger.info('socket:event:ack', { event: 'dice:roll', ok: true, to: socket.id });
-        cb && cb({ ok: true, ...result });
+        if (result.skipped) {
+          const nextIdx = result.turnIndex; // after skip, turnIndex already rotated
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: nextIdx, reason: 'skip' });
+          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: nextIdx });
+        }
+        const mustMove = !result.skipped;
+        logger.info('socket:event:ack', { event: 'dice:roll', ok: true, to: socket.id, mustMove });
+        cb && cb({ ok: true, gameId, mustMove, ...result });
       } catch (err) {
-        logger.error('socket:event:error', { event: 'dice:roll', error: err.message, socketId: socket.id });
-        cb && cb({ ok: false, message: err.message });
+        // Provide structured error codes to help clients
+        let code = 'UNKNOWN';
+        let extra = {};
+        if (err && err.message === 'Pending move exists') {
+          code = 'PENDING_MOVE';
+          try {
+            // Look up current game to return pending dice info
+            let gameId = roomToGame.get(roomId);
+            if (!gameId) gameId = await gameController.findPlayingGameIdByRoom(roomId);
+            if (gameId) {
+              const game = await gameController.getGameDocument(gameId);
+              if (game) extra = { gameId, pendingDiceValue: game.pendingDiceValue, turnIndex: game.turnIndex };
+            }
+          } catch (_e) {}
+        } else if (err && err.message === 'Not your turn') {
+          code = 'NOT_YOUR_TURN';
+          try {
+            let gameId = roomToGame.get(roomId);
+            if (!gameId) gameId = await gameController.findPlayingGameIdByRoom(roomId);
+            if (gameId) {
+              const game = await gameController.getGameDocument(gameId);
+              if (game) extra = { gameId, turnIndex: game.turnIndex };
+            }
+          } catch (_e) {}
+        }
+        logger.error('socket:event:error', { event: 'dice:roll', error: err.message, code, socketId: socket.id, ...extra });
+        cb && cb({ ok: false, code, message: err.message, ...extra });
       }
     });
 
@@ -178,7 +209,7 @@ module.exports = function init(io, logger) {
           nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
         }
         logger.info('socket:event:ack', { event: 'token:move', ok: true, to: socket.id });
-        cb && cb({ ok: true, ...outcome });
+        cb && cb({ ok: true, gameId, ...outcome });
       } catch (err) {
         logger.error('socket:event:error', { event: 'token:move', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
