@@ -20,6 +20,10 @@ export function connectSocket(getToken, dispatch) {
     dispatch(diceResult(p));
     p?.roomId && dispatch(fetchGame({ roomId: p.roomId }));
   });
+  // Guard emits on server-side errors
+  socket.on('connect_error', (err) => {
+    console.warn('socket connect_error', err?.message || err);
+  });
   socket.on('turn:change', (p) => {
     dispatch(updateTurn(p.turnIndex));
     p?.roomId && dispatch(fetchGame({ roomId: p.roomId }));

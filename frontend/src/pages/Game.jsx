@@ -19,6 +19,7 @@ export default function Game() {
     const idx = game?.players?.findIndex((p) => String(p.userId) === String(me));
     return idx === turnIndex;
   });
+  const disableRoll = !canRoll || status !== 'idle' || Boolean(pending);
 
   const onRoll = useCallback(async () => {
     if (!roomId) return;
@@ -52,15 +53,25 @@ export default function Game() {
       <div className="grid lg:grid-cols-[1fr_320px] gap-6 items-start">
         <div className="flex flex-col items-center gap-6">
           <BoardRenderer />
-          <Dice onRoll={onRoll} disabled={!canRoll || status !== 'idle'} rolling={status === 'rolling'} face={lastDice || undefined} glow={canRoll && status === 'idle'} />
+          <Dice onRoll={onRoll} disabled={disableRoll} rolling={status === 'rolling'} face={lastDice || undefined} glow={canRoll && status === 'idle' && !pending} />
         </div>
         <Card className="bg-white/5 backdrop-blur border border-white/10">
           <CardContent className="p-4 text-sm space-y-2">
             <div className="font-medium">HUD</div>
             <div>Last dice: {lastDice ?? '-'}</div>
-            <button className="underline disabled:opacity-50 w-fit" disabled={status !== 'idle' || !roomId} onClick={() => dispatch(autoMove({ roomId }))}>
-              Auto move
-            </button>
+            {pending && (
+              <button
+                className="underline disabled:opacity-50 w-fit"
+                disabled={!roomId}
+                onClick={async () => {
+                  const res = await dispatch(autoMove({ roomId }));
+                  if (res.error) setError(res.payload || 'Auto move failed');
+                  setPending(null);
+                }}
+              >
+                Auto move
+              </button>
+            )}
             <div className="text-xs text-gray-400">Turn index: {turnIndex}</div>
             {pending && (
               <div className="p-3 border rounded">
