@@ -1,25 +1,92 @@
-import { useEffect } from 'react';
-import { useDispatch } from 'react-redux';
+import { useEffect, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { connectSocket } from '../app/socket';
+import { connectSocket, getSocket } from '../app/socket';
+import { listRooms, createRoom, joinRoom } from '../features/rooms/roomsSlice';
 
 export default function Lobby() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  const rooms = useSelector((s) => s.rooms.list);
+  const [stake, setStake] = useState(10);
+  const [mode, setMode] = useState('Classic');
+  const [maxPlayers, setMaxPlayers] = useState(2);
 
   useEffect(() => {
     if (!token) {
       navigate('/login');
       return;
     }
-    connectSocket(() => token, dispatch);
+    const s = connectSocket(() => token, dispatch);
+    const onRoomUpdate = () => dispatch(listRooms());
+    s.on('room:create', onRoomUpdate);
+    s.on('room:update', onRoomUpdate);
+    s.on('room:full', onRoomUpdate);
+    s.on('game:start', (payload) => {
+      // navigate to game view when game starts
+      navigate('/game');
+    });
+    dispatch(listRooms());
+    return () => {
+      s.off('room:create', onRoomUpdate);
+      s.off('room:update', onRoomUpdate);
+      s.off('room:full', onRoomUpdate);
+      s.off('game:start');
+    };
   }, [dispatch, navigate, token]);
 
+  async function onCreate() {
+    await dispatch(createRoom({ stake: Number(stake), mode, maxPlayers: Number(maxPlayers) }));
+  }
+
+  async function onJoin(roomId) {
+    const res = await dispatch(joinRoom({ roomId }));
+    if (!res.error) navigate('/game');
+  }
+
   return (
-    <div className="p-6">
+    <div className="p-6 space-y-4">
       <h2 className="text-xl font-semibold">Lobby</h2>
-      <p className="text-sm text-muted-foreground">Scaffold ready. Room list and actions coming next.</p>
+      <div className="flex gap-2 items-end">
+        <div>
+          <label className="text-sm block">Stake</label>
+          <input className="border rounded px-2 py-1 w-24" type="number" value={stake} onChange={(e) => setStake(e.target.value)} />
+        </div>
+        <div>
+          <label className="text-sm block">Mode</label>
+          <select className="border rounded px-2 py-1" value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option>Classic</option>
+            <option>Quick</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-sm block">Players</label>
+          <select className="border rounded px-2 py-1" value={maxPlayers} onChange={(e) => setMaxPlayers(e.target.value)}>
+            <option value={2}>2</option>
+            <option value={4}>4</option>
+          </select>
+        </div>
+        <button className="bg-black text-white rounded px-3 py-2" onClick={onCreate}>Create</button>
+      </div>
+
+      <div>
+        <h3 className="font-medium mb-2">Open Rooms</h3>
+        <ul className="divide-y border rounded">
+          {rooms.length === 0 && <li className="p-3 text-sm text-gray-500">No rooms yet</li>}
+          {rooms.map((r) => (
+            <li key={r.roomId} className="p-3 flex items-center justify-between">
+              <div className="text-sm">
+                <div className="font-medium">{r.mode} · Stake {r.stake}</div>
+                <div className="text-gray-500">
+                  {r.players?.length || 0}/{r.maxPlayers} · {r.status}
+                </div>
+              </div>
+              <button className="underline" onClick={() => onJoin(r.roomId)}>Join</button>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
