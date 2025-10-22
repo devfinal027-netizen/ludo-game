@@ -9,6 +9,7 @@ export function animateToken(element, toX, toY) {
 
 export default function BoardRenderer() {
   const game = useSelector((s) => s.game.game);
+  const turnIndex = useSelector((s) => s.game.turnIndex);
   const containerRef = useRef(null);
   const tokensRef = useRef({});
 
@@ -16,7 +17,7 @@ export default function BoardRenderer() {
     const arr = [];
     (game?.players || []).forEach((p, pi) => {
       (p.tokens || []).forEach((t, ti) => {
-        arr.push({ playerIndex: pi, tokenIndex: ti, position: t.position });
+        arr.push({ playerIndex: pi, tokenIndex: ti, position: t.position, color: p.color });
       });
     });
     return arr;
@@ -43,7 +44,7 @@ export default function BoardRenderer() {
           <line key={`h-${i}`} x1={0} y1={i * 32} x2={480} y2={i * 32} stroke="#000" strokeWidth="0.5" />
         ))}
       </svg>
-      {flatTokens.map(({ playerIndex, tokenIndex }) => {
+      {flatTokens.map(({ playerIndex, tokenIndex, color }) => {
         const key = `${playerIndex}-${tokenIndex}`;
         return (
           <div
@@ -51,8 +52,8 @@ export default function BoardRenderer() {
             ref={(el) => {
               if (el) tokensRef.current[key] = el;
             }}
-            className="absolute w-6 h-6 rounded-full bg-blue-500 shadow"
-            style={{ transform: 'translate(0px, 0px)' }}
+            className={`absolute w-6 h-6 rounded-full shadow ${playerIndex === turnIndex ? 'ring-2 ring-black' : ''}`}
+            style={{ backgroundColor: color || '#3b82f6', transform: 'translate(0px, 0px)' }}
           />
         );
       })}
