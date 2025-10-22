@@ -2,6 +2,7 @@
 
 const jwt = require('jsonwebtoken');
 const { createRoom, joinRoom, startGameIfFull, listRooms } = require('../services/RoomService');
+const GameService = require('../services/GameService');
 const { config } = require('../config/config');
 const gameController = require('../controllers/gameController');
 
@@ -151,8 +152,25 @@ module.exports = function init(io, logger) {
           nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: nextIdx });
         }
         const mustMove = !result.skipped;
-        logger.info('socket:event:ack', { event: 'dice:roll', ok: true, to: socket.id, mustMove });
-        cb && cb({ ok: true, gameId, mustMove, ...result });
+        let legalTokens = [];
+        if (mustMove) {
+          try {
+            const game = await gameController.getGameDocument(gameId);
+            const player = game.players[result.turnIndex];
+            for (const t of player.tokens) {
+              try {
+                // simulate move on a shallow clone
+                const tokenClone = { tokenIndex: t.tokenIndex, state: t.state, stepsFromStart: t.stepsFromStart };
+                GameService._internals.applyMoveOnToken(tokenClone, result.value);
+                legalTokens.push(t.tokenIndex);
+              } catch (_e) {
+                // not legal; ignore
+              }
+            }
+          } catch (_e) {}
+        }
+        logger.info('socket:event:ack', { event: 'dice:roll', ok: true, to: socket.id, mustMove, legalTokensCount: legalTokens.length });
+        cb && cb({ ok: true, gameId, mustMove, legalTokens, ...result });
       } catch (err) {
         // Provide structured error codes to help clients
         let code = 'UNKNOWN';
@@ -181,6 +199,60 @@ module.exports = function init(io, logger) {
         }
         logger.error('socket:event:error', { event: 'dice:roll', error: err.message, code, socketId: socket.id, ...extra });
         cb && cb({ ok: false, code, message: err.message, ...extra });
+      }
+    });
+
+    // Auto move helper: server chooses the first legal token
+    socket.on('token:auto', async ({ roomId }, cb) => {
+      try {
+        const userId = socket.user?.userId;
+        logger.info('socket:event:receive', { event: 'token:auto', socketId: socket.id, userId, roomId });
+        if (!roomId) throw new Error('roomId required');
+        let gameId = roomToGame.get(roomId);
+        if (!gameId) {
+          gameId = await gameController.findPlayingGameIdByRoom(roomId);
+          if (!gameId) throw new Error('Game not found');
+          roomToGame.set(roomId, gameId);
+        }
+        const game = await gameController.getGameDocument(gameId);
+        if (!game) throw new Error('Game not found');
+        if (String(game.players[game.turnIndex].userId) !== String(userId)) throw new Error('Not your turn');
+        if (game.pendingDiceValue == null) throw new Error('No pending dice');
+        const value = game.pendingDiceValue;
+        const player = game.players[game.turnIndex];
+        let chosen = null;
+        for (const t of player.tokens) {
+          try {
+            const tokenClone = { tokenIndex: t.tokenIndex, state: t.state, stepsFromStart: t.stepsFromStart };
+            GameService._internals.applyMoveOnToken(tokenClone, value);
+            chosen = t.tokenIndex;
+            break;
+          } catch (_e) {}
+        }
+        if (chosen == null) {
+          // No legal move; fallback to skip via applyMove path which will rotate turn
+          const outcome = await gameController.handleTokenMove(gameId, 0, value, userId, logger);
+          logger.info('socket:event:ack', { event: 'token:auto', ok: true, to: socket.id, skipped: outcome.skipped });
+          return cb && cb({ ok: true, gameId, ...outcome });
+        }
+        const outcome = await gameController.handleTokenMove(gameId, Number(chosen), Number(value), userId, logger);
+        if (outcome.ended) {
+          logger.info('socket:event:emit', { event: 'game:end', roomId, gameId, winnerUserId: outcome.winnerUserId });
+          nsp.to(roomId).emit('game:end', { roomId, gameId, winnerUserId: outcome.winnerUserId });
+        } else if (outcome.skipped) {
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
+          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
+        } else {
+          logger.info('socket:event:emit', { event: 'token:move', roomId, gameId, tokenIndex: Number(chosen), steps: Number(value) });
+          nsp.to(roomId).emit('token:move', { roomId, gameId, tokenIndex: Number(chosen), steps: Number(value) });
+          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
+          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
+        }
+        logger.info('socket:event:ack', { event: 'token:auto', ok: true, to: socket.id, tokenIndex: chosen, steps: value });
+        cb && cb({ ok: true, gameId, tokenIndex: chosen, steps: value, ...outcome });
+      } catch (err) {
+        logger.error('socket:event:error', { event: 'token:auto', error: err.message, socketId: socket.id });
+        cb && cb({ ok: false, message: err.message });
       }
     });
 
