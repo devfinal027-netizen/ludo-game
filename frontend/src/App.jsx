@@ -25,7 +25,7 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <div className="min-h-screen text-gray-100 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#0f172a] to-[#1e293b]">
+      <div className="min-h-screen text-gray-100 bg-arena">
         <div className="pointer-events-none fixed inset-0 opacity-30" style={{ background: 'radial-gradient(600px 200px at 10% 10%, rgba(59,130,246,.25), transparent), radial-gradient(600px 200px at 90% 30%, rgba(34,197,94,.2), transparent), radial-gradient(400px 150px at 50% 80%, rgba(250,204,21,.12), transparent)'}} />
         <Header />
         <main className="container mx-auto p-6">

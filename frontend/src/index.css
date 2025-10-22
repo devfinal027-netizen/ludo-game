@@ -24,3 +24,26 @@
 .glow-border {
   box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 0 20px rgba(59,130,246,0.2);
 }
+
+/* Deep red animated background with flares */
+.bg-arena {
+  position: relative;
+  background: radial-gradient(ellipse at center, #3b0d0d 0%, #160606 60%, #0b0404 100%);
+}
+.bg-arena::before {
+  content: "";
+  position: absolute;
+  inset: -20% -10% -10% -20%;
+  background:
+    radial-gradient(600px 200px at 10% 10%, rgba(255, 100, 100, 0.18), transparent),
+    radial-gradient(500px 180px at 90% 25%, rgba(255, 180, 80, 0.14), transparent),
+    radial-gradient(400px 160px at 50% 90%, rgba(255, 60, 60, 0.12), transparent);
+  filter: blur(2px);
+  animation: arenaGlow 12s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes arenaGlow {
+  0% { opacity: 0.8; transform: translateY(0px) scale(1); }
+  100% { opacity: 1; transform: translateY(-10px) scale(1.02); }
+}
