@@ -3,6 +3,9 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { connectSocket, getSocket } from '../app/socket';
 import { listRooms, createRoom, joinRoom, leaveRoom } from '../features/rooms/roomsSlice';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Button from '@mui/material/Button';
 
 export default function Lobby() {
   const dispatch = useDispatch();
@@ -48,7 +51,7 @@ export default function Lobby() {
   return (
     <div className="p-6 space-y-4">
       <h2 className="text-xl font-semibold">Lobby</h2>
-      <div className="text-sm text-gray-500">Current room: {useSelector((s) => s.rooms.current)?.roomId || '-'}</div>
+      <div className="text-sm text-gray-400">Current room: {useSelector((s) => s.rooms.current)?.roomId || '-'}</div>
       <div className="flex gap-2 items-end">
         <div>
           <label className="text-sm block">Stake</label>
@@ -68,26 +71,26 @@ export default function Lobby() {
             <option value={4}>4</option>
           </select>
         </div>
-        <button className="bg-black text-white rounded px-3 py-2" onClick={onCreate}>Create</button>
-        <button className="border rounded px-3 py-2" onClick={() => dispatch(leaveRoom())}>Leave current</button>
+        <Button variant="contained" onClick={onCreate}>Create</Button>
+        <Button variant="outlined" onClick={() => dispatch(leaveRoom())}>Leave current</Button>
       </div>
 
       <div>
         <h3 className="font-medium mb-2">Open Rooms</h3>
-        <ul className="divide-y border rounded">
-          {rooms.length === 0 && <li className="p-3 text-sm text-gray-500">No rooms yet</li>}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {rooms.length === 0 && <div className="p-3 text-sm text-gray-500">No rooms yet</div>}
           {rooms.map((r) => (
-            <li key={r.roomId} className="p-3 flex items-center justify-between">
-              <div className="text-sm">
-                <div className="font-medium">{r.mode} · Stake {r.stake}</div>
-                <div className="text-gray-500">
-                  {r.players?.length || 0}/{r.maxPlayers} · {r.status}
+            <Card key={r.roomId} className="bg-white/5 backdrop-blur border border-white/10">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="text-sm">
+                  <div className="font-medium">{r.mode} · Stake {r.stake}</div>
+                  <div className="text-gray-400">{r.players?.length || 0}/{r.maxPlayers} · {r.status}</div>
                 </div>
-              </div>
-              <button className="underline" onClick={() => onJoin(r.roomId)}>Join</button>
-            </li>
+                <Button size="small" variant="outlined" onClick={() => onJoin(r.roomId)}>Join</Button>
+              </CardContent>
+            </Card>
           ))}
-        </ul>
+        </div>
       </div>
     </div>
   );

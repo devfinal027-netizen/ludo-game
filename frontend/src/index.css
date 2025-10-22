@@ -14,3 +14,13 @@
   from { transform: scale(1); opacity: 0.95; }
   to { transform: scale(1.05); opacity: 1; }
 }
+
+/* Neon card/glass helpers */
+.glass {
+  backdrop-filter: blur(10px);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 0 20px rgba(59,130,246,0.2);
+}
