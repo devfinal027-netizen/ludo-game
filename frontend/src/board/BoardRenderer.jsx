@@ -33,7 +33,16 @@ export default function BoardRenderer() {
   }, [flatTokens]);
 
   return (
-    <div ref={containerRef} className="relative w-[480px] h-[480px] bg-green-100 rounded">
+    <div ref={containerRef} className="relative w-[480px] h-[480px] bg-green-100 rounded overflow-hidden">
+      {/* Grid backdrop (light) */}
+      <svg className="absolute inset-0 w-full h-full opacity-20" viewBox="0 0 480 480">
+        {Array.from({ length: 15 }).map((_, i) => (
+          <line key={`v-${i}`} x1={i * 32} y1={0} x2={i * 32} y2={480} stroke="#000" strokeWidth="0.5" />
+        ))}
+        {Array.from({ length: 15 }).map((_, i) => (
+          <line key={`h-${i}`} x1={0} y1={i * 32} x2={480} y2={i * 32} stroke="#000" strokeWidth="0.5" />
+        ))}
+      </svg>
       {flatTokens.map(({ playerIndex, tokenIndex }) => {
         const key = `${playerIndex}-${tokenIndex}`;
         return (
@@ -42,7 +51,7 @@ export default function BoardRenderer() {
             ref={(el) => {
               if (el) tokensRef.current[key] = el;
             }}
-            className="absolute w-6 h-6 rounded-full bg-blue-500"
+            className="absolute w-6 h-6 rounded-full bg-blue-500 shadow"
             style={{ transform: 'translate(0px, 0px)' }}
           />
         );
