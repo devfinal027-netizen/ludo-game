@@ -1,5 +1,8 @@
 import { Outlet } from 'react-router-dom'
 import Header from './components/Header'
+import { useEffect } from 'react'
+import { useDispatch } from 'react-redux'
+import { connectSocket } from './app/socket'
 import { createTheme, ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 
@@ -14,6 +17,11 @@ const theme = createTheme({
 });
 
 export default function App() {
+  const dispatch = useDispatch();
+  useEffect(() => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+    if (token) connectSocket(() => token, dispatch);
+  }, [dispatch]);
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />

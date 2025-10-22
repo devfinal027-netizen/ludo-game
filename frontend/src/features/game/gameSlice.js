@@ -64,6 +64,8 @@ const gameSlice = createSlice({
     gameStarted(state, action) {
       state.game = action.payload;
       state.turnIndex = action.payload?.turnIndex ?? 0;
+      // Ensure roomId is set for subsequent emits
+      if (!state.game.roomId && action.payload?.roomId) state.game.roomId = action.payload.roomId;
     },
     diceResult(state, action) {
       state.lastDice = action.payload?.value ?? null;

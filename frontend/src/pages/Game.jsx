@@ -10,7 +10,7 @@ import CardContent from '@mui/material/CardContent';
 export default function Game() {
   const dispatch = useDispatch();
   const { turnIndex, lastDice, game, status } = useSelector((s) => s.game);
-  const roomId = useMemo(() => game?.roomId, [game]);
+  const roomId = useMemo(() => game?.roomId || (typeof localStorage !== 'undefined' ? JSON.parse(localStorage.getItem('currentRoom') || 'null')?.roomId : null), [game]);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(null); // { value, legalTokens }
 
