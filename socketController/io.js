@@ -18,7 +18,9 @@ module.exports = function init(io, logger) {
       const token = raw.startsWith('Bearer ') ? raw.slice(7) : raw;
       if (token) {
         const payload = jwt.verify(token, config.jwtSecret);
-        socket.user = { userId: payload.userId };
+        const userId = payload.userId || payload.id || payload._id;
+        if (!userId) return next(new Error('Unauthorized'));
+        socket.user = { userId: String(userId) };
         return next();
       }
       const testUserId = socket.handshake.auth?.userId;
