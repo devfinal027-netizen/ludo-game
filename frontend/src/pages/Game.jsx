@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { rollDice, moveToken, autoMove, fetchGame } from '../features/game/gameSlice';
 import BoardRenderer from '../board/BoardRenderer.jsx';
 import Toast from '../components/Toast.jsx';
+import Dice from '../components/Dice.jsx';
 
 export default function Game() {
   const dispatch = useDispatch();
@@ -46,14 +47,14 @@ export default function Game() {
     <div className="p-6 space-y-3">
       <h2 className="text-xl font-semibold">Game</h2>
       <p className="text-sm text-gray-500">Turn: {turnIndex}</p>
-      <div className="flex items-center gap-3">
-        <button className="bg-black text-white rounded px-3 py-2 disabled:opacity-50" disabled={!canRoll || status !== 'idle'} onClick={onRoll}>
-          Roll Dice
-        </button>
-        <span className="text-sm">Last dice: {lastDice ?? '-'}</span>
-        <button className="underline text-sm disabled:opacity-50" disabled={status !== 'idle' || !roomId} onClick={() => dispatch(autoMove({ roomId }))}>
-          Auto move
-        </button>
+      <div className="flex items-center gap-6">
+        <Dice onRoll={onRoll} disabled={!canRoll || status !== 'idle'} rolling={status === 'rolling'} face={lastDice || undefined} glow={canRoll && status === 'idle'} />
+        <div className="flex flex-col gap-2 text-sm">
+          <div>Last dice: {lastDice ?? '-'}</div>
+          <button className="underline disabled:opacity-50 w-fit" disabled={status !== 'idle' || !roomId} onClick={() => dispatch(autoMove({ roomId }))}>
+            Auto move
+          </button>
+        </div>
       </div>
       {pending && (
         <div className="p-3 border rounded max-w-md">
