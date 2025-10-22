@@ -1,13 +1,15 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { rollDice, moveToken, autoMove, fetchGame } from '../features/game/gameSlice';
 import BoardRenderer from '../board/BoardRenderer.jsx';
+import Toast from '../components/Toast.jsx';
 
 export default function Game() {
   const dispatch = useDispatch();
   const { turnIndex, lastDice, game, status } = useSelector((s) => s.game);
   const roomId = useMemo(() => game?.roomId, [game]);
   const [error, setError] = useState('');
+  const [pending, setPending] = useState(null); // { value, legalTokens }
 
   const canRoll = useSelector((s) => {
     const me = s.auth.user?._id || s.auth.user?.id || s.auth.user?.userId;
@@ -25,9 +27,13 @@ export default function Game() {
     }
     const ack = res.payload;
     if (ack.mustMove) {
-      const tokenIndex = (ack.legalTokens?.[0] ?? 0);
-      const move = await dispatch(moveToken({ roomId, tokenIndex, steps: ack.value }));
-      if (move.error) setError(move.payload || 'Move failed');
+      if (Array.isArray(ack.legalTokens) && ack.legalTokens.length > 1) {
+        setPending({ value: ack.value, legalTokens: ack.legalTokens });
+      } else {
+        const tokenIndex = (ack.legalTokens?.[0] ?? 0);
+        const move = await dispatch(moveToken({ roomId, tokenIndex, steps: ack.value }));
+        if (move.error) setError(move.payload || 'Move failed');
+      }
     }
   }, [dispatch, roomId]);
 
@@ -49,7 +55,27 @@ export default function Game() {
           Auto move
         </button>
       </div>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
+      {pending && (
+        <div className="p-3 border rounded max-w-md">
+          <div className="mb-2 text-sm">Select a token to move ({pending.value} steps):</div>
+          <div className="flex gap-2">
+            {pending.legalTokens.map((ti) => (
+              <button
+                key={ti}
+                className="border rounded px-3 py-1 text-sm"
+                onClick={async () => {
+                  const res = await dispatch(moveToken({ roomId, tokenIndex: ti, steps: pending.value }));
+                  if (res.error) setError(res.payload || 'Move failed');
+                  setPending(null);
+                }}
+              >
+                Token {ti + 1}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <Toast message={error} onClose={() => setError('')} />
       <BoardRenderer />
     </div>
   );
