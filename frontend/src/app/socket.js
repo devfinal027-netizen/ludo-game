@@ -13,6 +13,7 @@ export function connectSocket(getToken, dispatch) {
   });
   socket.on('connect', () => dispatch(setConnected(true)));
   socket.on('disconnect', () => dispatch(setConnected(false)));
+  socket.on('connect_error', () => dispatch(setConnected(false)));
 
   socket.on('game:start', (p) => dispatch(gameStarted(p)));
   socket.on('dice:result', (p) => {

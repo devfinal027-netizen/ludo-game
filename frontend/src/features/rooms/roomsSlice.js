@@ -36,15 +36,40 @@ export const joinRoom = createAsyncThunk('rooms/join', async ({ roomId }, { reje
   }
 });
 
+export const leaveRoom = createAsyncThunk('rooms/leave', async (_, { getState, rejectWithValue }) => {
+  try {
+    const s = getSocket();
+    const roomId = getState()?.rooms?.current?.roomId;
+    if (!s || !roomId) return { roomId: null };
+    const res = await new Promise((res) => s.emit('session:leave', { roomId }, res));
+    if (!res?.ok) throw new Error(res?.message || 'Leave failed');
+    return { roomId };
+  } catch (err) {
+    return rejectWithValue(err.message || 'Failed to leave room');
+  }
+});
+
+const persistedCurrent = typeof localStorage !== 'undefined' ? (() => {
+  try {
+    return JSON.parse(localStorage.getItem('currentRoom'));
+  } catch {
+    return null;
+  }
+})() : null;
+
 const roomsSlice = createSlice({
   name: 'rooms',
-  initialState: { list: [], current: null, status: 'idle', error: null },
+  initialState: { list: [], current: persistedCurrent, status: 'idle', error: null },
   reducers: {
     setRooms(state, action) {
       state.list = action.payload || [];
     },
     setCurrentRoom(state, action) {
       state.current = action.payload || null;
+      try {
+        if (state.current) localStorage.setItem('currentRoom', JSON.stringify(state.current));
+        else localStorage.removeItem('currentRoom');
+      } catch (_e) {}
     },
   },
   extraReducers: (builder) => {
@@ -63,9 +88,21 @@ const roomsSlice = createSlice({
       .addCase(createRoom.fulfilled, (state, action) => {
         if (action.payload) state.list.unshift(action.payload);
         state.current = action.payload || state.current;
+        try {
+          if (state.current) localStorage.setItem('currentRoom', JSON.stringify(state.current));
+        } catch (_e) {}
       })
       .addCase(joinRoom.fulfilled, (state, action) => {
         state.current = action.payload || state.current;
+        try {
+          if (state.current) localStorage.setItem('currentRoom', JSON.stringify(state.current));
+        } catch (_e) {}
+      })
+      .addCase(leaveRoom.fulfilled, (state) => {
+        state.current = null;
+        try {
+          localStorage.removeItem('currentRoom');
+        } catch (_e) {}
       });
   },
 });

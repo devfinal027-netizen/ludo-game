@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { connectSocket, getSocket } from '../app/socket';
-import { listRooms, createRoom, joinRoom } from '../features/rooms/roomsSlice';
+import { listRooms, createRoom, joinRoom, leaveRoom } from '../features/rooms/roomsSlice';
 
 export default function Lobby() {
   const dispatch = useDispatch();
@@ -48,6 +48,7 @@ export default function Lobby() {
   return (
     <div className="p-6 space-y-4">
       <h2 className="text-xl font-semibold">Lobby</h2>
+      <div className="text-sm text-gray-500">Current room: {useSelector((s) => s.rooms.current)?.roomId || '-'}</div>
       <div className="flex gap-2 items-end">
         <div>
           <label className="text-sm block">Stake</label>
@@ -68,6 +69,7 @@ export default function Lobby() {
           </select>
         </div>
         <button className="bg-black text-white rounded px-3 py-2" onClick={onCreate}>Create</button>
+        <button className="border rounded px-3 py-2" onClick={() => dispatch(leaveRoom())}>Leave current</button>
       </div>
 
       <div>
