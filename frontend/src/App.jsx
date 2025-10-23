@@ -3,15 +3,17 @@ import Header from './components/Header'
 import { useEffect } from 'react'
 import { useDispatch } from 'react-redux'
 import { connectSocket } from './app/socket'
+import { fetchMe } from './features/auth/authSlice'
 import { createTheme, ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 
 const theme = createTheme({
   palette: {
     mode: 'dark',
-    primary: { main: '#22c55e' },
-    secondary: { main: '#06b6d4' },
-    background: { default: '#0f172a', paper: 'rgba(17, 24, 39, 0.7)' },
+    primary: { main: '#ef4444' }, // red
+    secondary: { main: '#f59e0b' }, // amber/gold
+    background: { default: '#0b0404', paper: 'rgba(20, 10, 10, 0.7)' },
+    text: { primary: '#fef3c7' },
   },
   shape: { borderRadius: 12 },
 });
@@ -20,7 +22,15 @@ export default function App() {
   const dispatch = useDispatch();
   useEffect(() => {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
-    if (token) connectSocket(() => token, dispatch);
+    if (token) {
+      // Restore user session on app mount
+      dispatch(fetchMe()).catch((err) => {
+        console.error('[App] Failed to restore user:', err);
+        // Token might be expired, clear it
+        localStorage.removeItem('token');
+      });
+      connectSocket(() => token, dispatch);
+    }
   }, [dispatch]);
   return (
     <ThemeProvider theme={theme}>

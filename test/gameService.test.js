@@ -1,7 +1,8 @@
 'use strict';
 
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+let MongoMemoryServer;
+try { ({ MongoMemoryServer } = require('mongodb-memory-server')); } catch (_) { MongoMemoryServer = null; }
 const { connectDatabase } = require('../config/database');
 const { Room } = require('../models/Room');
 const { Game } = require('../models/Game');
@@ -26,8 +27,11 @@ function makeRoom({ stake = 10, mode = 'Classic', maxPlayers = 2 } = {}) {
 describe('GameService', () => {
   let mem;
   beforeAll(async () => {
-    mem = await MongoMemoryServer.create();
-    process.env.MONGO_URI = mem.getUri();
+    if (!process.env.MONGO_URI) {
+      if (!MongoMemoryServer) throw new Error('mongodb-memory-server not available and MONGO_URI not set');
+      mem = await MongoMemoryServer.create();
+      process.env.MONGO_URI = mem.getUri();
+    }
     await connectDatabase(logger);
   });
 
@@ -43,25 +47,69 @@ describe('GameService', () => {
 
   test('start -> roll -> move release on 6 -> extra turn', async () => {
     await makeRoom();
-    const game = await startGameSession('r1', logger);
+    const started = await startGameSession('r1', logger);
 
-    // Force next die to be 6 by setting diceSeq so RNG(seed+seq) results in 6 is not guaranteed;
-    // Instead, we roll until we get a 6, with a guard to prevent infinite loop.
-    let roll;
-    for (let i = 0; i < 20; i++) {
-      roll = await rollDice('u1', game.gameId, logger);
-      if (roll.value === 6) break;
-      // if not 6 and no legal moves from base, auto-skip occurs
-      if (roll.value !== 6) continue;
+    // Roll respecting turn order until u1 gets a 6, with a guard to prevent long loops.
+    let roll = null;
+    for (let i = 0; i < 60; i++) {
+      const g = await Game.findOne({ gameId: started.gameId });
+      const current = g.players[g.turnIndex];
+      let res;
+      try {
+        res = await rollDice(String(current.userId), started.gameId, logger);
+      } catch (e) {
+        if (String(e && e.message || e).includes('Pending move exists')) {
+          // Resolve existing pending move for current player, then continue
+          const gPending = await Game.findOne({ gameId: started.gameId });
+          const steps = gPending.pendingDiceValue;
+          const player = gPending.players[gPending.turnIndex];
+          let applied = false;
+          for (const t of player.tokens) {
+            try {
+              await applyMove(String(player.userId), started.gameId, t.tokenIndex, steps, logger);
+              applied = true;
+              break;
+            } catch (_) {}
+          }
+          if (applied) {
+            continue;
+          }
+        }
+        throw e;
+      }
+      if (String(current.userId) === 'u1' && res.value === 6) {
+        roll = res;
+        break;
+      }
+      // If another player rolled a 6, they now have a pending move.
+      // Clear it by applying the release move so the loop can continue without 'Pending move exists'.
+      if (String(current.userId) !== 'u1' && res.value === 6) {
+        await applyMove(String(current.userId), started.gameId, 0, 6, logger);
+        continue;
+      }
+      // If the roll was not skipped, there is a pending dice that must be resolved by a legal move.
+      if (!res.skipped) {
+        const g2 = await Game.findOne({ gameId: started.gameId });
+        const pIdx = g2.turnIndex; // still same player until a move is applied
+        const player = g2.players[pIdx];
+        let applied = false;
+        for (const t of player.tokens) {
+          try {
+            await applyMove(String(player.userId), started.gameId, t.tokenIndex, res.value, logger);
+            applied = true;
+            break;
+          } catch (_) {}
+        }
+        if (!applied) {
+          // If no legal move found, let loop continue; but ideally this shouldn't happen
+        }
+      }
+      // otherwise continue loop; turn may rotate automatically on skip
     }
     expect(roll).toBeTruthy();
+    if (!roll || roll.value !== 6) return; // avoid flakiness if unlucky
 
-    if (roll.value !== 6) {
-      // If we didn't roll a 6 in 20 tries (unlikely), skip the rest to avoid flakiness
-      return;
-    }
-
-    const moveRes = await applyMove('u1', game.gameId, 0, 6, logger);
+    const moveRes = await applyMove('u1', started.gameId, 0, 6, logger);
     expect(moveRes.ended).not.toBe(true);
     // Extra turn expected when 6
     expect(moveRes.nextTurnIndex).toBe(0);

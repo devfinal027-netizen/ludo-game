@@ -5,6 +5,7 @@ const { Game } = require('../models/Game');
 const { Room } = require('../models/Room');
 const { createDeterministicRng, generateGameSeed } = require('../utils/rng');
 const { config } = require('../config/config');
+const { validateMove: validateByRules, anyLegalToken } = require('./validator');
 
 // Core Ludo parameters (simple baseline, Classic/Quick differ by tokenCount)
 const BOARD_TRACK_LENGTH = 52; // ring
@@ -29,18 +30,10 @@ function nextTurnIndex(current, playersLen) {
 }
 
 function hasAnyLegalMove(game, playerIndex, diceValue) {
-  // Minimal legality: if 6 allows releasing from base; if on track, moving within limits; if homeStretch within bounds; no move if all tokens home
-  const player = game.players[playerIndex];
-  for (const t of player.tokens) {
-    if (t.state === 'home') continue;
-    if (t.state === 'base' && diceValue === 6) return true;
-    if (t.state === 'track') return true; // baseline, actual path legality enforced in applyMove
-    if (t.state === 'homeStretch') {
-      const target = t.stepsFromStart + diceValue;
-      if (target <= BOARD_TRACK_LENGTH + HOME_STRETCH_LENGTH) return true;
-    }
-  }
-  return false;
+  return anyLegalToken(game, playerIndex, diceValue, {
+    allowBlocking: true,
+    extraTurnOnSix: true,
+  });
 }
 
 function allTokensHome(player) {
@@ -185,30 +178,19 @@ function applyMoveOnToken(token, diceValue) {
   throw new Error('Invalid token state');
 }
 
-function resolveCaptures(game, moverPlayerIndex, tokenStateAfter) {
-  // Simplified capture: if mover lands on same track index as any opponent token on 'track', capture it (send to base), except safe squares.
-  // Safe squares: indices 0, 8, 13, 21, 26, 34, 39, 47 (typical Ludo safe spots). Adjust if needed.
-  const SAFE_INDICES = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
-  const captures = [];
-
-  if (tokenStateAfter.to.state !== 'track') return captures;
-  const landingIndex = tokenStateAfter.to.stepsFromStart;
-  if (SAFE_INDICES.has(landingIndex)) return captures;
-
-  for (let pIdx = 0; pIdx < game.players.length; pIdx++) {
-    if (pIdx === moverPlayerIndex) continue;
-    const opponent = game.players[pIdx];
-    for (const ot of opponent.tokens) {
-      if (ot.state === 'track' && ot.stepsFromStart === landingIndex) {
-        // capture
-        captures.push({ victimUserId: opponent.userId, tokenIndex: ot.tokenIndex });
-        ot.state = 'base';
-        ot.stepsFromStart = -1;
-      }
-    }
+function resolveCaptures(game, moverPlayerIndex, capturesList) {
+  // Apply captures received from validator: reset victim tokens to base
+  const applied = [];
+  for (const c of capturesList || []) {
+    const victimPlayer = game.players[c.playerIndex];
+    if (!victimPlayer) continue;
+    const tok = victimPlayer.tokens.find((t) => Number(t.tokenIndex) === Number(c.tokenIndex));
+    if (!tok) continue;
+    tok.state = 'base';
+    tok.stepsFromStart = -1;
+    applied.push({ victimUserId: victimPlayer.userId, tokenIndex: tok.tokenIndex });
   }
-
-  return captures;
+  return applied;
 }
 
 async function applyMove(userId, gameId, tokenIndex, steps, logger) {
@@ -225,18 +207,20 @@ async function applyMove(userId, gameId, tokenIndex, steps, logger) {
   const token = player.tokens.find((t) => t.tokenIndex === Number(tokenIndex));
   if (!token) throw new Error('Token not found');
 
-  // Validate legal move exists
-  if (!hasAnyLegalMove(game, game.turnIndex, steps)) {
-    // no legal move: consume dice and rotate turn
-    game.pendingDiceValue = undefined;
-    game.pendingDicePlayerIndex = undefined;
-    game.turnIndex = nextTurnIndex(game.turnIndex, game.players.length);
-    await game.save();
-    return { skipped: true, nextTurnIndex: game.turnIndex };
-  }
+  // Validate the selected move using centralized validator
+  const result = validateByRules(game.toObject ? game.toObject() : game, game.turnIndex, Number(tokenIndex), Number(steps), {
+    allowBlocking: true,
+    extraTurnOnSix: true,
+  });
+  if (!result.legal) throw new Error(result.reason || 'Illegal move');
 
-  const moveDelta = applyMoveOnToken(token, steps);
-  const captures = resolveCaptures(game, game.turnIndex, moveDelta);
+  // Apply position change
+  const from = { state: token.state, stepsFromStart: token.stepsFromStart };
+  token.state = result.to.state;
+  token.stepsFromStart = result.to.stepsFromStart;
+
+  // Apply captures (reset opponent tokens)
+  const capturesApplied = resolveCaptures(game, game.turnIndex, result.captures);
 
   game.moveSeq += 1;
   game.moveLogs.push({
@@ -244,9 +228,9 @@ async function applyMove(userId, gameId, tokenIndex, steps, logger) {
     userId: String(userId),
     tokenIndex: Number(tokenIndex),
     steps,
-    from: moveDelta.from,
-    to: moveDelta.to,
-    captures,
+    from,
+    to: { state: token.state, stepsFromStart: token.stepsFromStart },
+    captures: capturesApplied,
     turnIndex: game.turnIndex,
     at: new Date(),
   });
@@ -266,8 +250,9 @@ async function applyMove(userId, gameId, tokenIndex, steps, logger) {
     return { ended: true, winnerUserId: winner };
   }
 
-  // Turn rotation: extra turn on 6; otherwise normal advance
-  if (!rolledSix) {
+  // Turn rotation: extra turn on 6 (or per validator extraTurn); otherwise normal advance
+  const extraTurn = !!(result.extraTurn || rolledSix);
+  if (!extraTurn) {
     game.turnIndex = nextTurnIndex(game.turnIndex, game.players.length);
   }
 
@@ -289,11 +274,149 @@ async function endGameSession(gameId, winnerUserId, logger) {
   return game.toObject();
 }
 
+// Socket handler for dice roll with enriched event emission
+async function handleDiceRoll(socket, payload, nsp, logger, cb, enrichEventPayload) {
+  try {
+    const { roomId } = payload || {};
+    const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
+    
+    if (!roomId) throw new Error('roomId required');
+    
+    // Find game by roomId (assume roomToGame mapping exists in caller or we fetch it)
+    const { Game } = require('../models/Game');
+    const game = await Game.findOne({ roomId, status: 'playing' });
+    if (!game) throw new Error('Game not found for room');
+    
+    const gameId = game.gameId;
+    
+    // Check for pending move
+    if (game.pendingDiceValue != null) {
+      logger.warn('dice:roll:pending_move', { gameId, userId, pendingValue: game.pendingDiceValue });
+      return cb && cb({ ok: false, code: 'PENDING_MOVE', message: 'Pending move exists', pendingDiceValue: game.pendingDiceValue });
+    }
+    
+    // Check turn
+    const currentPlayer = game.players[game.turnIndex];
+    if (String(currentPlayer.userId) !== String(userId)) {
+      logger.warn('dice:roll:not_your_turn', { gameId, userId, currentTurn: game.turnIndex });
+      return cb && cb({ ok: false, code: 'NOT_YOUR_TURN', message: 'Not your turn' });
+    }
+    
+    // Roll dice
+    const rollResult = await rollDice(userId, gameId, logger);
+    const { value, turnIndex, skipped, nextTurnIndex } = rollResult;
+    
+    // Calculate legal tokens if not skipped
+    let legalTokens = [];
+    let mustMove = false;
+    if (!skipped) {
+      const { anyLegalToken } = require('./validator');
+      for (let i = 0; i < currentPlayer.tokens.length; i++) {
+        const legal = anyLegalToken(game.toObject ? game.toObject() : game, game.turnIndex, value, { allowBlocking: true, extraTurnOnSix: true }, i);
+        if (legal) legalTokens.push(i);
+      }
+      mustMove = legalTokens.length > 0;
+    }
+    
+    // Enrich and emit dice:result event
+    const dicePayload = enrichEventPayload({
+      roomId,
+      gameId,
+      value,
+      skipped,
+      legalTokens: skipped ? [] : legalTokens,
+      mustMove: skipped ? false : mustMove,
+      turnIndex: nextTurnIndex,  // Use nextTurnIndex as the new current turn
+      nextTurnIndex,
+    });
+    nsp.to(roomId).emit('dice:result', dicePayload);
+    logger.info('socket:event:emit', { event: 'dice:result', roomId, value, skipped, turnIndex: nextTurnIndex, seq: dicePayload.seq });
+    
+    // If skipped, emit turn:change so frontend updates immediately
+    if (skipped) {
+      const turnPayload = enrichEventPayload({ roomId, gameId, turnIndex: nextTurnIndex });
+      nsp.to(roomId).emit('turn:change', turnPayload);
+      logger.info('socket:event:emit', { event: 'turn:change', roomId, turnIndex: nextTurnIndex, seq: turnPayload.seq });
+    }
+    
+    // Acknowledge
+    cb && cb({ ok: true, value, skipped, legalTokens, mustMove, turnIndex: nextTurnIndex, nextTurnIndex });
+  } catch (err) {
+    logger.error('socket:event:error', { event: 'dice:roll', error: err.message, socketId: socket.id });
+    cb && cb({ ok: false, message: err.message });
+  }
+}
+
+// Socket handler for token move with enriched event emission
+async function handleTokenMove(socket, payload, nsp, logger, cb, enrichEventPayload) {
+  try {
+    const { roomId, tokenIndex, steps } = payload || {};
+    const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
+    
+    if (!roomId || tokenIndex == null || steps == null) {
+      throw new Error('roomId, tokenIndex, and steps required');
+    }
+    
+    // Find game
+    const { Game } = require('../models/Game');
+    const game = await Game.findOne({ roomId, status: 'playing' });
+    if (!game) throw new Error('Game not found for room');
+    
+    const gameId = game.gameId;
+    const playerIndex = game.turnIndex;
+    
+    // Apply move
+    const moveResult = await applyMove(userId, gameId, tokenIndex, steps, logger);
+    
+    // Reload game for fresh state
+    const updatedGame = await Game.findOne({ gameId });
+    const token = updatedGame.players[playerIndex].tokens.find((t) => t.tokenIndex === Number(tokenIndex));
+    
+    // Emit token:move event
+    const movePayload = enrichEventPayload({
+      roomId,
+      gameId,
+      playerIndex,
+      tokenIndex: Number(tokenIndex),
+      steps: Number(steps),
+      newState: token.state,
+      stepsFromStart: token.stepsFromStart,
+      turnIndex: updatedGame.turnIndex,
+    });
+    nsp.to(roomId).emit('token:move', movePayload);
+    logger.info('socket:event:emit', { event: 'token:move', roomId, playerIndex, tokenIndex, seq: movePayload.seq });
+    
+    // Emit turn:change
+    const turnPayload = enrichEventPayload({ roomId, gameId, turnIndex: updatedGame.turnIndex });
+    nsp.to(roomId).emit('turn:change', turnPayload);
+    logger.info('socket:event:emit', { event: 'turn:change', roomId, turnIndex: updatedGame.turnIndex, seq: turnPayload.seq });
+    
+    // Check if game ended
+    if (moveResult.ended || updatedGame.status === 'ended') {
+      const endPayload = enrichEventPayload({
+        roomId,
+        gameId,
+        winnerUserId: updatedGame.winnerUserId,
+        game: updatedGame.toObject ? updatedGame.toObject() : updatedGame,
+      });
+      nsp.to(roomId).emit('game:end', endPayload);
+      logger.info('socket:event:emit', { event: 'game:end', roomId, gameId, winnerUserId: updatedGame.winnerUserId, seq: endPayload.seq });
+    }
+    
+    cb && cb({ ok: true, turnIndex: updatedGame.turnIndex });
+  } catch (err) {
+    logger.error('socket:event:error', { event: 'token:move', error: err.message, socketId: socket.id });
+    cb && cb({ ok: false, message: err.message });
+  }
+}
+
 module.exports = {
   startGameSession,
   rollDice,
   applyMove,
   endGameSession,
+  handleDiceRoll,
+  handleTokenMove,
   // helpers exported for tests
   _internals: {
     hasAnyLegalMove,

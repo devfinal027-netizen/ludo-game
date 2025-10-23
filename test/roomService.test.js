@@ -1,21 +1,27 @@
 'use strict';
 
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+let MongoMemoryServer;
+try { ({ MongoMemoryServer } = require('mongodb-memory-server')); } catch (_) { MongoMemoryServer = null; }
 const { connectDatabase } = require('../config/database');
 const { createRoom, joinRoom, startGameIfFull, cancelRoom } = require('../services/RoomService');
 
 const logger = { info: () => {}, error: () => {} };
 
 describe('RoomService', () => {
+  let mem;
   beforeAll(async () => {
-    const mem = await MongoMemoryServer.create();
-    process.env.MONGO_URI = mem.getUri();
+    if (!process.env.MONGO_URI) {
+      if (!MongoMemoryServer) throw new Error('mongodb-memory-server not available and MONGO_URI not set');
+      mem = await MongoMemoryServer.create();
+      process.env.MONGO_URI = mem.getUri();
+    }
     await connectDatabase(logger);
   });
 
   afterAll(async () => {
     await mongoose.disconnect();
+    if (mem) await mem.stop();
   });
 
   test('create -> join -> full -> start', async () => {

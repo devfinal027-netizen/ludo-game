@@ -8,7 +8,10 @@
     "dev": "cross-env NODE_ENV=development nodemon index.js",
     "start": "node index.js",
     "lint": "eslint .",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:int": "jest --runInBand test/socketGame.int.test.js",
+    "test:validator": "jest --runInBand test/validator.test.js",
+    "manual": "node test/test.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -41,5 +44,14 @@
     "prettier": "^3.3.3",
     "socket.io-client": "^4.8.1",
     "supertest": "^7.0.0"
+  },
+  "jest": {
+    "setupFiles": [
+      "dotenv/config"
+    ],
+    "testPathIgnorePatterns": [
+      "\\\\node_modules\\\\",
+      "<rootDir>/test/test.js"
+    ]
   }
 }

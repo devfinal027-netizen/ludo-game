@@ -1,5 +1,5 @@
 'use strict';
-
+const { validateMove } = require('../services/validator');
 const jwt = require('jsonwebtoken');
 const { createRoom, joinRoom, startGameIfFull, listRooms } = require('../services/RoomService');
 const GameService = require('../services/GameService');
@@ -8,11 +8,39 @@ const gameController = require('../controllers/gameController');
 
 module.exports = function init(io, logger) {
   const nsp = io.of('/ludo');
+  
+  // Event versioning: add timestamp and sequence to prevent stale events
+  let eventSequence = 0;
+  function enrichEventPayload(payload) {
+    return { ...payload, timestamp: Date.now(), seq: ++eventSequence };
+  }
 
-  // Map roomId -> gameId for quick lookup
-  const roomToGame = new Map();
+  const roomToGame = new Map(); // roomId -> gameId
+  const activeByUser = new Map(); // userId -> socketId
+  const userLastRoom = new Map(); // userId -> roomId
+  const roomRegistry = new Map(); // roomId -> Set<userId>
+  const opLock = new Map(); // userId -> Promise chain
+  const roomLock = new Map(); // roomId -> Promise chain
 
-  // Auth guard for namespace (accept raw userId in non-production for tests)
+  function runExclusive(userId, fn) {
+    const prev = opLock.get(userId) || Promise.resolve();
+    const next = prev.catch(() => {}).then(fn).finally(() => {
+      if (opLock.get(userId) === next) opLock.delete(userId);
+    });
+    opLock.set(userId, next);
+    return next;
+  }
+
+  function runRoomExclusive(roomId, fn) {
+    const prev = roomLock.get(roomId) || Promise.resolve();
+    const next = prev.catch(() => {}).then(fn).finally(() => {
+      if (roomLock.get(roomId) === next) roomLock.delete(roomId);
+    });
+    roomLock.set(roomId, next);
+    return next;
+  }
+
+  // Auth guard
   nsp.use((socket, next) => {
     try {
       const raw = socket.handshake.auth?.token || socket.handshake.headers?.authorization || '';
@@ -37,18 +65,71 @@ module.exports = function init(io, logger) {
 
   nsp.on('connection', (socket) => {
     logger.info('socket:connected', { socketId: socket.id, userId: socket.user?.userId });
+    const userId = socket.user?.userId;
 
+    // Single active socket
+    try {
+      const prevId = activeByUser.get(userId);
+      if (prevId && prevId !== socket.id) {
+        const prevSock = nsp.sockets.get(prevId);
+        if (prevSock) prevSock.disconnect(true);
+      }
+      activeByUser.set(userId, socket.id);
+      socket.join(`user:${userId}`);
+    } catch (_) {}
+
+    // -------------------- ROOM CREATE --------------------
     async function handleCreate(payload, cb) {
       try {
         const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
         logger.info('socket:event:receive', { event: 'room|session:create', socketId: socket.id, userId, payload });
+
         const room = await createRoom({ ...payload, creatorUserId: userId, logger });
-        socket.join(room.roomId);
-        logger.info('socket:event:emit', { event: 'room:create', roomId: room.roomId, players: room.players.length });
-        nsp.emit('room:create', room);
-        const ack = { ok: true, room };
-        logger.info('socket:event:ack', { event: 'room|session:create', ok: true, roomId: room.roomId, to: socket.id });
-        cb && cb(ack);
+
+        if (!room || !room.roomId) {
+          logger.error('room:create_failed', { socketId: socket.id, userId, payload });
+          return cb && cb({ ok: false, message: 'Room creation failed' });
+        }
+
+        try {
+          await socket.join(room.roomId);
+        } catch (joinErr) {
+          logger.error('socket:join_room_failed', { roomId: room.roomId, socketId: socket.id, error: joinErr.message });
+          return cb && cb({ ok: false, message: 'Failed to join newly created room' });
+        }
+
+        // Track presence for creator
+        userLastRoom.set(userId, room.roomId);
+        if (!roomRegistry.has(room.roomId)) roomRegistry.set(room.roomId, new Set());
+        roomRegistry.get(room.roomId).add(userId);
+
+        const createPayload = enrichEventPayload(room);
+        logger.info('socket:event:emit', { event: 'room:create', roomId: room.roomId, players: room.players?.length, seq: createPayload.seq });
+        nsp.emit('room:create', createPayload);
+        
+        // Emit room:update to the room itself
+        const updatePayload = enrichEventPayload(room);
+        logger.info('socket:event:emit', { event: 'room:update', roomId: room.roomId, players: room.players?.length, seq: updatePayload.seq });
+        nsp.to(room.roomId).emit('room:update', updatePayload);
+
+        // Check if room is full immediately (e.g., single-player or auto-fill)
+        if (room.status === 'full') {
+          await runRoomExclusive(room.roomId, async () => {
+            const fullPayload = enrichEventPayload(room);
+            logger.info('socket:event:emit', { event: 'room:full', roomId: room.roomId, seq: fullPayload.seq });
+            nsp.to(room.roomId).emit('room:full', fullPayload);
+            const startedRoom = await startGameIfFull({ roomId: room.roomId, logger });
+            if (startedRoom && startedRoom.roomId) {
+              const game = await gameController.handleStartGame(startedRoom.roomId, logger);
+              roomToGame.set(startedRoom.roomId, game.gameId);
+              const startPayload = enrichEventPayload({ roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, players: game.players });
+              logger.info('socket:event:emit', { event: 'game:start', roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, seq: startPayload.seq });
+              nsp.to(room.roomId).emit('game:start', startPayload);
+            }
+          });
+        }
+
+        cb && cb({ ok: true, room });
       } catch (err) {
         logger.error('socket:event:error', { event: 'room|session:create', error: err.message, socketId: socket.id });
         cb && cb({ ok: false, message: err.message });
@@ -58,258 +139,211 @@ module.exports = function init(io, logger) {
     socket.on('session:create', handleCreate);
     socket.on('room:create', handleCreate);
 
+    // -------------------- ROOM JOIN --------------------
     async function handleJoin(payload, cb) {
       try {
-        const { roomId } = payload || {};
+        const { roomId, autoCreate, mode = 'Classic', stake = 10, maxPlayers = 2 } = payload || {};
         const userId = socket.user?.userId || socket.handshake.auth?.userId || 'dev-user';
         logger.info('socket:event:receive', { event: 'room|session:join', socketId: socket.id, userId, roomId });
-        const room = await joinRoom({ roomId, userId, logger });
-        if (!room) return cb && cb({ ok: false, message: 'Room not available' });
-        socket.join(room.roomId);
-        logger.info('socket:event:emit', { event: 'room:update', roomId: room.roomId, players: room.players.length });
-        nsp.to(room.roomId).emit('room:update', room);
-        if (room.status === 'full') {
-          logger.info('socket:event:emit', { event: 'room:full', roomId: room.roomId });
-          nsp.to(room.roomId).emit('room:full', room);
-          const startedRoom = await startGameIfFull({ roomId: room.roomId, logger });
-          if (startedRoom) {
-            const game = await gameController.handleStartGame(startedRoom.roomId, logger);
-            roomToGame.set(startedRoom.roomId, game.gameId);
-            const payload = { roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, players: game.players };
-            logger.info('socket:event:emit', { event: 'game:start', roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex });
-            nsp.to(room.roomId).emit('game:start', payload);
+        await runExclusive(userId, async () => {
+          // Verify room existence or optionally auto-create
+          let found = null;
+          try {
+            if (require('../services/RoomService').getRoom) {
+              found = await require('../services/RoomService').getRoom(roomId);
+            } else {
+              // Fallback: search via listRooms
+              const list = await listRooms({ status: 'waiting' });
+              found = (list || []).find((r) => r.roomId === roomId) || null;
+            }
+          } catch (_e) {}
+          if (!found && autoCreate) {
+            try {
+              logger.info('session:join:autoCreate', { userId, mode, stake, maxPlayers });
+              found = await createRoom({ creatorUserId: userId, mode, stake, maxPlayers, logger });
+              if (found && found.roomId) {
+                logger.info('session:join:autoCreate:ok', { roomId: found.roomId, userId });
+              }
+            } catch (e) {
+              logger.error('session:join:autoCreate:error', { error: e.message, userId });
+            }
           }
-        }
-        logger.info('socket:event:ack', { event: 'room|session:join', ok: true, roomId: room.roomId, to: socket.id });
-        cb && cb({ ok: true, room });
+          if (!found) {
+            logger.warn('session:join:no_room', { roomId, userId });
+            try { nsp.to(socket.id).emit('room:error', { ok: false, code: 'E_NO_ROOM', roomId }); } catch (_) {}
+            return cb && cb({ ok: false, code: 'E_NO_ROOM', message: 'Room not found', roomId });
+          }
+
+          // Attempt to join via service; treat duplicate/already-joined as idempotent success
+          let room;
+          try {
+            room = await joinRoom({ roomId: found.roomId || roomId, userId, logger });
+          } catch (e) {
+            const msg = String(e && e.message || e);
+            if (/(already|exists|joined)/i.test(msg)) {
+              room = found || { roomId };
+            } else {
+              throw e;
+            }
+          }
+          if (!room) {
+            logger.warn('session:join:no_room', { roomId, userId });
+            try { nsp.to(socket.id).emit('room:error', { ok: false, code: 'E_NO_ROOM', roomId }); } catch (_) {}
+            return cb && cb({ ok: false, code: 'E_ROOM_NOT_AVAILABLE', message: 'Room not available', roomId });
+          }
+          socket.join(room.roomId);
+          // Presence bookkeeping
+          userLastRoom.set(userId, room.roomId);
+          if (!roomRegistry.has(room.roomId)) roomRegistry.set(room.roomId, new Set());
+          roomRegistry.get(room.roomId).add(userId);
+          const updatePayload = enrichEventPayload(room);
+          logger.info('socket:event:emit', { event: 'room:update', roomId: room.roomId, players: room.players?.length, seq: updatePayload.seq });
+          nsp.to(room.roomId).emit('room:update', updatePayload);
+          logger.info('session:join:joined', { userId, roomId: room.roomId });
+          if (room.status === 'full') {
+            await runRoomExclusive(room.roomId, async () => {
+              const fullPayload = enrichEventPayload(room);
+              logger.info('socket:event:emit', { event: 'room:full', roomId: room.roomId, seq: fullPayload.seq });
+              nsp.to(room.roomId).emit('room:full', fullPayload);
+
+              const startedRoom = await startGameIfFull({ roomId: room.roomId, logger });
+              if (startedRoom && startedRoom.roomId) {
+                const game = await gameController.handleStartGame(startedRoom.roomId, logger);
+                roomToGame.set(startedRoom.roomId, game.gameId);
+                const startPayload = enrichEventPayload({ roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, players: game.players });
+                logger.info('socket:event:emit', { event: 'game:start', roomId: startedRoom.roomId, gameId: game.gameId, turnIndex: game.turnIndex, seq: startPayload.seq });
+                nsp.to(room.roomId).emit('game:start', startPayload);
+              }
+            });
+          }
+
+          cb && cb({ ok: true, room });
+        });
+
       } catch (err) {
         logger.error('socket:event:error', { event: 'room|session:join', error: err.message, socketId: socket.id });
-        cb && cb({ ok: false, message: err.message });
+        cb && cb({ ok: false, code: 'E_JOIN_FAILED', message: err.message });
       }
     }
 
     socket.on('session:join', handleJoin);
     socket.on('room:join', handleJoin);
 
+    // -------------------- ROOMS LIST --------------------
     socket.on('rooms:list', async (_payload, cb) => {
       try {
         logger.info('socket:event:receive', { event: 'rooms:list', socketId: socket.id });
         const rooms = await listRooms({ status: 'waiting' });
-        logger.info('socket:event:ack', { event: 'rooms:list', count: rooms.length, to: socket.id });
-        cb && cb({ rooms });
+        const enriched = rooms.map((r) => ({ ...r, online: roomRegistry.get(r.roomId)?.size || 0 }));
+        logger.info('socket:event:ack', { event: 'rooms:list', count: enriched.length, to: socket.id });
+        cb && cb({ ok: true, rooms: enriched });
       } catch (err) {
         logger.error('socket:event:error', { event: 'rooms:list', error: err.message, socketId: socket.id });
-        cb && cb({ rooms: [] });
+        cb && cb({ ok: false, rooms: [] });
       }
     });
 
-    // Leave socket rooms
-    async function handleLeave(payload, cb) {
-      try {
-        const { roomId } = payload || {};
-        logger.info('socket:event:receive', { event: 'room|session:leave', socketId: socket.id, roomId });
-        if (roomId) {
-          await socket.leave(roomId);
-          logger.info('room:leave', { socketId: socket.id, roomId });
-          return cb && cb({ ok: true, roomId });
-        }
-        // If no roomId provided, leave all joined rooms except the socket's own room
-        const joined = Array.from(socket.rooms || []);
-        await Promise.all(
-          joined
-            .filter((r) => r !== socket.id)
-            .map((r) => socket.leave(r)),
-        );
-        logger.info('room:leaveAll', { socketId: socket.id, rooms: joined.filter((r) => r !== socket.id) });
-        cb && cb({ ok: true, leftAll: true });
-      } catch (err) {
-        logger.error('socket:event:error', { event: 'room|session:leave', error: err.message, socketId: socket.id });
-        cb && cb({ ok: false, message: err.message });
-      }
-    }
-
-    socket.on('session:leave', handleLeave);
-    socket.on('room:leave', handleLeave);
-
-    // Gameplay events
-    socket.on('dice:roll', async ({ roomId }, cb) => {
+    // -------------------- CHAT & REACTION --------------------
+    socket.on('chat:message', async ({ roomId, message }, cb) => {
       try {
         const userId = socket.user?.userId;
-        logger.info('socket:event:receive', { event: 'dice:roll', socketId: socket.id, userId, roomId });
-        if (!roomId) throw new Error('roomId required');
-        let gameId = roomToGame.get(roomId);
-        if (!gameId) {
-          gameId = await gameController.findPlayingGameIdByRoom(roomId);
-          if (!gameId) throw new Error('Game not found');
-          roomToGame.set(roomId, gameId);
-        }
-        const result = await gameController.handleDiceRoll(gameId, userId, logger);
-        logger.info('socket:event:emit', { event: 'dice:result', roomId, gameId, value: result.value, skipped: result.skipped });
-        nsp.to(roomId).emit('dice:result', { roomId, gameId, ...result });
-        if (result.skipped) {
-          const nextIdx = result.turnIndex; // after skip, turnIndex already rotated
-          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: nextIdx, reason: 'skip' });
-          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: nextIdx });
-        }
-        const mustMove = !result.skipped;
-        let legalTokens = [];
-        if (mustMove) {
-          try {
+        if (!roomId || !message) throw new Error('roomId and message required');
+        const payload = enrichEventPayload({ roomId, userId, message, at: new Date().toISOString() });
+        nsp.to(roomId).emit('chat:message', payload);
+        cb && cb({ ok: true });
+      } catch (err) {
+        logger.error('socket:event:error', { event: 'chat:message', error: err.message, socketId: socket.id });
+        cb && cb({ ok: false, message: err.message });
+      }
+    });
+
+    socket.on('reaction:emoji', async ({ roomId, emoji }, cb) => {
+      try {
+        const userId = socket.user?.userId;
+        if (!roomId || !emoji) throw new Error('roomId and emoji required');
+        const payload = enrichEventPayload({ roomId, userId, emoji, at: new Date().toISOString() });
+        nsp.to(roomId).emit('reaction:emoji', payload);
+        cb && cb({ ok: true });
+      } catch (err) {
+        logger.error('socket:event:error', { event: 'reaction:emoji', error: err.message, socketId: socket.id });
+        cb && cb({ ok: false, message: err.message });
+      }
+    });
+
+    // -------------------- GAME RECONNECT --------------------
+    socket.on('game:reconnect', async ({ roomId }, cb) => {
+      try {
+        const userId = socket.user?.userId;
+        await runExclusive(userId, async () => {
+          const targetRoom = roomId || userLastRoom.get(userId);
+          if (!targetRoom) return cb && cb({ ok: false, code: 'E_NO_PRIOR_ROOM', message: 'roomId required' });
+
+          try { await socket.join(targetRoom); } catch (_) {}
+          userLastRoom.set(userId, targetRoom);
+          if (!roomRegistry.has(targetRoom)) roomRegistry.set(targetRoom, new Set());
+          roomRegistry.get(targetRoom).add(userId);
+
+          let gameId = roomToGame.get(targetRoom);
+          if (!gameId) {
+            gameId = await gameController.findPlayingGameIdByRoom(targetRoom);
+            if (gameId) roomToGame.set(targetRoom, gameId);
+          }
+
+          if (gameId) {
             const game = await gameController.getGameDocument(gameId);
-            const player = game.players[result.turnIndex];
-            for (const t of player.tokens) {
-              try {
-                // simulate move on a shallow clone
-                const tokenClone = { tokenIndex: t.tokenIndex, state: t.state, stepsFromStart: t.stepsFromStart };
-                GameService._internals.applyMoveOnToken(tokenClone, result.value);
-                legalTokens.push(t.tokenIndex);
-              } catch (_e) {
-                // not legal; ignore
+            if (game) {
+              const startPayload = enrichEventPayload({ roomId: targetRoom, gameId, turnIndex: game.turnIndex, players: game.players });
+              nsp.to(socket.id).emit('game:start', startPayload);
+              logger.info('game:reconnect:snapshot', { userId, roomId: targetRoom, gameId, seq: startPayload.seq });
+              if (game.pendingDiceValue != null) {
+                const dicePayload = enrichEventPayload({ roomId: targetRoom, gameId, value: game.pendingDiceValue, skipped: false, turnIndex: game.turnIndex, nextTurnIndex: game.turnIndex });
+                nsp.to(socket.id).emit('dice:result', dicePayload);
+                logger.info('game:reconnect:pending_dice', { userId, value: game.pendingDiceValue, seq: dicePayload.seq });
               }
             }
-          } catch (_e) {}
-        }
-        logger.info('socket:event:ack', { event: 'dice:roll', ok: true, to: socket.id, mustMove, legalTokensCount: legalTokens.length });
-        cb && cb({ ok: true, gameId, mustMove, legalTokens, ...result });
+          }
+
+          cb && cb({ ok: true, roomId: targetRoom, gameId });
+        });
       } catch (err) {
-        // Provide structured error codes to help clients
-        let code = 'UNKNOWN';
-        let extra = {};
-        if (err && err.message === 'Pending move exists') {
-          code = 'PENDING_MOVE';
-          try {
-            // Look up current game to return pending dice info
-            let gameId = roomToGame.get(roomId);
-            if (!gameId) gameId = await gameController.findPlayingGameIdByRoom(roomId);
-            if (gameId) {
-              const game = await gameController.getGameDocument(gameId);
-              if (game) extra = { gameId, pendingDiceValue: game.pendingDiceValue, turnIndex: game.turnIndex };
-            }
-          } catch (_e) {}
-        } else if (err && err.message === 'Not your turn') {
-          code = 'NOT_YOUR_TURN';
-          try {
-            let gameId = roomToGame.get(roomId);
-            if (!gameId) gameId = await gameController.findPlayingGameIdByRoom(roomId);
-            if (gameId) {
-              const game = await gameController.getGameDocument(gameId);
-              if (game) extra = { gameId, turnIndex: game.turnIndex };
-            }
-          } catch (_e) {}
-        }
-        logger.error('socket:event:error', { event: 'dice:roll', error: err.message, code, socketId: socket.id, ...extra });
-        cb && cb({ ok: false, code, message: err.message, ...extra });
+        logger.error('socket:event:error', { event: 'game:reconnect', error: err.message, socketId: socket.id });
+        cb && cb({ ok: false, code: 'E_RECONNECT_FAILED', message: err.message });
       }
     });
 
-    // Auto move helper: server chooses the first legal token
-    socket.on('token:auto', async ({ roomId }, cb) => {
+    // -------------------- ADDITIONAL GAMEPLAY EVENTS --------------------
+    socket.on('game:get', async (payload, cb) => {
       try {
-        const userId = socket.user?.userId;
-        logger.info('socket:event:receive', { event: 'token:auto', socketId: socket.id, userId, roomId });
-        if (!roomId) throw new Error('roomId required');
-        let gameId = roomToGame.get(roomId);
-        if (!gameId) {
-          gameId = await gameController.findPlayingGameIdByRoom(roomId);
-          if (!gameId) throw new Error('Game not found');
-          roomToGame.set(roomId, gameId);
-        }
-        const game = await gameController.getGameDocument(gameId);
-        if (!game) throw new Error('Game not found');
-        if (String(game.players[game.turnIndex].userId) !== String(userId)) throw new Error('Not your turn');
-        if (game.pendingDiceValue == null) throw new Error('No pending dice');
-        const value = game.pendingDiceValue;
-        const player = game.players[game.turnIndex];
-        let chosen = null;
-        for (const t of player.tokens) {
-          try {
-            const tokenClone = { tokenIndex: t.tokenIndex, state: t.state, stepsFromStart: t.stepsFromStart };
-            GameService._internals.applyMoveOnToken(tokenClone, value);
-            chosen = t.tokenIndex;
-            break;
-          } catch (_e) {}
-        }
-        if (chosen == null) {
-          // No legal move; fallback to skip via applyMove path which will rotate turn
-          const outcome = await gameController.handleTokenMove(gameId, 0, value, userId, logger);
-          logger.info('socket:event:ack', { event: 'token:auto', ok: true, to: socket.id, skipped: outcome.skipped });
-          return cb && cb({ ok: true, gameId, ...outcome });
-        }
-        const outcome = await gameController.handleTokenMove(gameId, Number(chosen), Number(value), userId, logger);
-        if (outcome.ended) {
-          logger.info('socket:event:emit', { event: 'game:end', roomId, gameId, winnerUserId: outcome.winnerUserId });
-          nsp.to(roomId).emit('game:end', { roomId, gameId, winnerUserId: outcome.winnerUserId });
-        } else if (outcome.skipped) {
-          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
-          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
-        } else {
-          logger.info('socket:event:emit', { event: 'token:move', roomId, gameId, tokenIndex: Number(chosen), steps: Number(value) });
-          nsp.to(roomId).emit('token:move', { roomId, gameId, tokenIndex: Number(chosen), steps: Number(value) });
-          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
-          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
-        }
-        logger.info('socket:event:ack', { event: 'token:auto', ok: true, to: socket.id, tokenIndex: chosen, steps: value });
-        cb && cb({ ok: true, gameId, tokenIndex: chosen, steps: value, ...outcome });
-      } catch (err) {
-        logger.error('socket:event:error', { event: 'token:auto', error: err.message, socketId: socket.id });
-        cb && cb({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on('token:move', async ({ roomId, tokenIndex, steps }, cb) => {
-      try {
-        const userId = socket.user?.userId;
-        logger.info('socket:event:receive', { event: 'token:move', socketId: socket.id, userId, roomId, tokenIndex, steps });
-        if (!roomId) throw new Error('roomId required');
-        let gameId = roomToGame.get(roomId);
-        if (!gameId) {
-          gameId = await gameController.findPlayingGameIdByRoom(roomId);
-          if (!gameId) throw new Error('Game not found');
-          roomToGame.set(roomId, gameId);
-        }
-        const outcome = await gameController.handleTokenMove(gameId, Number(tokenIndex), Number(steps), userId, logger);
-        if (outcome.ended) {
-          logger.info('socket:event:emit', { event: 'game:end', roomId, gameId, winnerUserId: outcome.winnerUserId });
-          nsp.to(roomId).emit('game:end', { roomId, gameId, winnerUserId: outcome.winnerUserId });
-        } else if (outcome.skipped) {
-          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
-          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
-        } else {
-          logger.info('socket:event:emit', { event: 'token:move', roomId, gameId, tokenIndex: Number(tokenIndex), steps: Number(steps) });
-          nsp.to(roomId).emit('token:move', { roomId, gameId, tokenIndex: Number(tokenIndex), steps: Number(steps) });
-          logger.info('socket:event:emit', { event: 'turn:change', roomId, gameId, turnIndex: outcome.nextTurnIndex });
-          nsp.to(roomId).emit('turn:change', { roomId, gameId, turnIndex: outcome.nextTurnIndex });
-        }
-        logger.info('socket:event:ack', { event: 'token:move', ok: true, to: socket.id });
-        cb && cb({ ok: true, gameId, ...outcome });
-      } catch (err) {
-        logger.error('socket:event:error', { event: 'token:move', error: err.message, socketId: socket.id });
-        cb && cb({ ok: false, message: err.message });
-      }
-    });
-
-    socket.on('game:get', async ({ roomId }, cb) => {
-      try {
-        logger.info('socket:event:receive', { event: 'game:get', socketId: socket.id, roomId });
-        let gameId = roomToGame.get(roomId);
-        let game;
-        if (gameId) {
-          game = await gameController.getGameDocument(gameId);
-        } else {
-          game = await gameController.getLatestGameDocumentByRoom(roomId);
-          if (game) roomToGame.set(roomId, game.gameId);
-        }
+        const { roomId } = payload || {};
+        if (!roomId) return cb && cb({ ok: false, message: 'roomId required' });
+        
+        const game = await gameController.getGameByRoomId(roomId);
         if (!game) return cb && cb({ ok: false, message: 'Game not found' });
-        logger.info('socket:event:ack', { event: 'game:get', ok: true, to: socket.id, gameId: game.gameId });
-        cb && cb({ ok: true, game });
+        
+        logger.info('socket:event:ack', { event: 'game:get', roomId, gameId: game.gameId });
+        cb && cb({ ok: true, game: game.toObject ? game.toObject() : game });
       } catch (err) {
-        logger.error('socket:event:error', { event: 'game:get', error: err.message, socketId: socket.id });
+        logger.error('socket:event:error', { event: 'game:get', error: err.message });
         cb && cb({ ok: false, message: err.message });
       }
     });
-
-    socket.on('disconnect', (reason) => {
-      logger.info('socket:disconnected', { socketId: socket.id, reason });
+    
+    socket.on('token:move', async (payload, cb) => {
+      try { await GameService.handleTokenMove(socket, payload, nsp, logger, cb, enrichEventPayload); } catch (err) { logger.error(err); cb && cb({ ok: false, message: err.message }); }
     });
+
+    socket.on('dice:roll', async (payload, cb) => {
+      try { await GameService.handleDiceRoll(socket, payload, nsp, logger, cb, enrichEventPayload); } catch (err) { logger.error(err); cb && cb({ ok: false, message: err.message }); }
+    });
+
+    socket.on('disconnect', () => {
+      logger.info('socket:disconnected', { socketId: socket.id, userId });
+      activeByUser.delete(userId);
+      const lastRoom = userLastRoom.get(userId);
+      if (lastRoom && roomRegistry.has(lastRoom)) {
+        roomRegistry.get(lastRoom).delete(userId);
+      }
+    });
+
   });
 };

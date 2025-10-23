@@ -126,4 +126,5 @@ module.exports = {
   findPlayingGameIdByRoom,
   getGameDocument,
   getLatestGameDocumentByRoom,
+  getGameByRoomId: getLatestGameDocumentByRoom, // Alias for socket handlers
 };

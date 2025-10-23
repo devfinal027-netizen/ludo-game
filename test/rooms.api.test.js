@@ -1,11 +1,13 @@
 'use strict';
+const mongoose = require('mongoose');
 
 const request = require('supertest');
 const http = require('http');
 const express = require('express');
 const routes = require('../routes');
 const { createLogger } = require('../utils/logger');
-const { MongoMemoryServer } = require('mongodb-memory-server');
+let MongoMemoryServer;
+try { ({ MongoMemoryServer } = require('mongodb-memory-server')); } catch (_) { MongoMemoryServer = null; }
 const { connectDatabase } = require('../config/database');
 const jwt = require('jsonwebtoken');
 const { config } = require('../config/config');
@@ -20,16 +22,22 @@ function makeApp() {
 
 describe('Rooms API', () => {
   let server;
+  let mem;
 
   beforeAll(async () => {
-    const mem = await MongoMemoryServer.create();
-    process.env.MONGO_URI = mem.getUri();
+    if (!process.env.MONGO_URI) {
+      if (!MongoMemoryServer) throw new Error('mongodb-memory-server not available and MONGO_URI not set');
+      mem = await MongoMemoryServer.create();
+      process.env.MONGO_URI = mem.getUri();
+    }
     await connectDatabase(console);
     server = makeApp();
   });
 
   afterAll(async () => {
     await new Promise((r) => server.close(r));
+    try { await mongoose.disconnect(); } catch (_) {}
+    if (mem) await mem.stop();
   });
 
   function auth() {

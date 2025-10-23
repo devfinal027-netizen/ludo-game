@@ -23,6 +23,15 @@ async function start() {
   const io = new Server(server, {
     path: SOCKET_PATH,
     cors: { origin: '*', methods: ['GET', 'POST'] },
+    transports: ['websocket'],
+    allowUpgrades: true,
+    perMessageDeflate: true,
+    pingInterval: 10000,
+    pingTimeout: 25000,
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 60_000,
+      skipMiddlewares: false,
+    },
   });
 
   // Basic middlewares
